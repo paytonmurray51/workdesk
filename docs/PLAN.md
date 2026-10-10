@@ -22,8 +22,8 @@ the "Chosen direction · Option C, outdoors" artboards in the Workdesk design ca
 
 | Part | Choice | Why |
 |---|---|---|
-| Server | One Go binary (`net/http`) | ~15 MB file, ~20–40 MB RAM, no runtime to install |
-| Database | SQLite (pure-Go driver, WAL mode) | One file, no DB server |
+| Server | One Go binary (`net/http`), Go 1.26 | ~15 MB file, ~20–40 MB RAM, no runtime to install |
+| Database | SQLite (pure-Go `modernc.org/sqlite`, WAL mode) | One file, no DB server |
 | Frontend | Preact + Vite, embedded in the binary | ~30 KB JS; same CSS variables as the mockup |
 | Drag & drop | SortableJS | Small, touch-friendly |
 | Sign-in | Google OpenID Connect | Only invited emails allowed |
@@ -36,7 +36,8 @@ the "Chosen direction · Option C, outdoors" artboards in the Workdesk design ca
 - `board_members` (board, user, role: owner / editor / checker / viewer)
 - `api_tokens` (board, name, hashed token, last_used) — one per Claude routine
 - `lists` (board, name, kind: daily | standing, sections)
-- `items` (list, title, section, done, due, carried_days, source_type, source_id, source_url, position)
+- `items` (list, title, section, done, done_at, due, carried_days, source_type, source_id, source_url, position)
+  - `done_at` lets a daily list show open items plus those checked since local midnight
   - `source_id` makes posts idempotent, so re-runs don't duplicate items
 - `briefings` (board, markdown, stats JSON, created_at)
 - `inbox_items` (board, type, title, snippet, url, reason, status: new / added / snoozed / dismissed)
@@ -79,8 +80,17 @@ PUT   /api/boards/{board}/days/{date}/timeboxes
   (`workdesk-data:/data`, SQLite file `/data/workdesk.db`). Settings via `.env`
   (Google OAuth client, session secret, base URL, time zone).
 - Public hostname `workdesk.voodootechlabs.com` as a new public-hostname route on the
-  existing `cloudflared` container on docker-host (workdesk joins its Docker network; no
-  host port needs to be published). Needed so cloud Claude routines can reach the API and MCP.
+  existing `cloudflared` container on docker-host. Needed so cloud Claude routines can reach
+  the API and MCP.
+  - cloudflared (token mode, plain `docker run`) is only on Docker's default `bridge`
+    network, which has no container-name DNS, and the other services on docker-host are
+    reached by host port. So workdesk does the same: compose publishes
+    `172.17.0.1:8080` (docker0 gateway) and `127.0.0.1:8080`, not the LAN, and the tunnel
+    route is `http://172.17.0.1:8080`. No `TUNNEL_NETWORK` setting; cloudflared is untouched.
+- Container: `gcr.io/distroless/static-debian12:nonroot` (built image ~14 MB),
+  `container_name: workdesk`, read-only root fs, all capabilities dropped, 128 MB memory
+  limit, healthcheck via `/workdesk healthcheck` (→ `GET /healthz`).
+  `no-new-privileges` is off because on docker-host it makes exec fail.
 - Updates: GitHub Actions builds and pushes the image to GHCR (private) on each tag;
   `docker compose pull && docker compose up -d` on the VM.
 - Backups: Proxmox vzdump of the VM, plus nightly SQLite copies inside the data volume.
@@ -93,6 +103,11 @@ PUT   /api/boards/{board}/days/{date}/timeboxes
 ## Milestones
 
 1. Skeleton: Go server, SQLite migrations, Google sign-in, boards and lists, Today list UI.
+   **Done 2026-10-10.** Only `WORKDESK_ADMIN_EMAILS` can sign in (rechecked on every
+   request) until invites land in milestone 5; admins see every board. Seeds Work
+   (`has_schedule`) and Personal, each with a daily "Today" list. API so far (session cookie
+   only): `GET /api/me`, `GET /api/boards`, `GET /api/boards/{board}/lists`,
+   `GET|POST /api/lists/{list}/items`, `PATCH /api/items/{id}` (done, title).
 2. API + tokens + MCP server; a sample Claude routine prompt that posts a briefing.
 3. Outdoors tile UI: brief, progress, lists, Jira/calendar widgets, inbox triage, themes.
 4. Timeboxes ("Your day"), carry-over job, carry-over review.
