@@ -10,7 +10,16 @@ the "Chosen direction · Option C, outdoors" artboards in the Workdesk design ca
 - Sign-in with Google. Only invited emails can sign in.
 - The app stores **no** email/calendar/Jira credentials. Claude reads those through its own
   connectors and posts results here. Items keep a link back (Jira issue, email, event).
-- API for Claude: REST + an MCP server, with per-board tokens.
+- API for Claude: REST + an MCP server. Two ways in (decided 2026-10-10):
+  - **Board API tokens** (`wdk_…`) for Claude Code / scripts: one board each, created and
+    revoked in Settings, stored as SHA-256 hashes, secret shown once.
+  - **OAuth 2.1** so workdesk can be added as a claude.ai custom connector (claude.ai can't
+    send a fixed bearer header). Built into the binary: dynamic client registration, code +
+    S256 PKCE, 1 h access / rotating 30-day refresh tokens, all hashed. Consent needs Google
+    sign-in, and the person **picks which boards** the connector gets (can be several).
+    Revoke under Settings → Connected apps. Client ID Metadata Documents aren't supported
+    yet (DCR only).
+  - Tokens and grants can never create or list other tokens (session-only endpoints).
 - Timeboxes live on the dashboard only (never written to Google Calendar).
 - Unfinished "Today" items carry over at midnight and keep a carried-days count.
 - Work board has the "Your day" timebox schedule; Personal does not.
@@ -34,36 +43,58 @@ the "Chosen direction · Option C, outdoors" artboards in the Workdesk design ca
 - `users` (google sub, email, name)
 - `boards` (name, color, timezone, has_schedule)
 - `board_members` (board, user, role: owner / editor / checker / viewer)
-- `api_tokens` (board, name, hashed token, last_used) — one per Claude routine
+- `api_tokens` (board, name, hashed token, prefix, last_used) — one per Claude routine
+- `oauth_clients`, `oauth_grants` (+ `oauth_grant_boards`), `oauth_tokens` (codes, access and
+  refresh tokens, hashed) — for MCP connectors
 - `lists` (board, name, kind: daily | standing, sections)
 - `items` (list, title, section, done, done_at, due, carried_days, source_type, source_id, source_url, position)
   - `done_at` lets a daily list show open items plus those checked since local midnight
   - `source_id` makes posts idempotent, so re-runs don't duplicate items
-- `briefings` (board, markdown, stats JSON, created_at)
-- `inbox_items` (board, type, title, snippet, url, reason, status: new / added / snoozed / dismissed)
+- `briefings` (board, markdown, stats JSON, source_id, created_at) — upsert by source_id
+- `inbox_items` (board, type, title, snippet, url, reason, status: new / added / snoozed / dismissed,
+  source_id) — re-push keeps status
 - `widgets` (board, name, JSON payload) — calendar events, Jira issues snapshot
 - `timeboxes` (board, date, start, end, kind: task / meeting / break, title, item_ids, accepted)
 - `layouts` (user, board, JSON of box order and sizes)
 
 ## API (REST, bearer token or session cookie)
 
+`{board}`, `{list}`, `{id}` are numeric ids. Built in milestone 2.
+
 ```
-GET   /api/boards
-POST  /api/boards/{board}/briefings
-GET   /api/boards/{board}/lists
-POST  /api/boards/{board}/lists
-GET   /api/lists/{list}/items?open=true
-POST  /api/lists/{list}/items            (one or many, upsert by source_id)
-PATCH /api/items/{id}                    (done, title, move to list)
-POST  /api/boards/{board}/inbox
-PUT   /api/boards/{board}/widgets/{name}
-PUT   /api/boards/{board}/days/{date}/timeboxes
+GET    /api/me
+GET    /api/boards
+GET    /api/boards/{board}/lists
+POST   /api/boards/{board}/lists                 {name, kind}; same name returns existing (200)
+GET    /api/lists/{list}/items?open=true
+POST   /api/lists/{list}/items                   one or many, upsert by source_id
+PATCH  /api/items/{id}                           {done, title, list_id}
+POST   /api/boards/{board}/briefings             {markdown, stats, source_id}
+GET    /api/boards/{board}/briefings/latest
+POST   /api/boards/{board}/inbox                 one or many, upsert by source_id
+GET    /api/boards/{board}/inbox?status=new
+PUT    /api/boards/{board}/widgets/{name}        body = JSON payload
+GET    /api/boards/{board}/widgets
+PUT    /api/boards/{board}/days/{date}/timeboxes array or {boxes: [...]}, replaces the day
+GET    /api/boards/{board}/days/{date}/timeboxes
+# session only (Settings UI)
+GET|POST /api/boards/{board}/tokens   DELETE /api/tokens/{id}
+GET      /api/connections             DELETE /api/connections/{id}
 ```
+
+OAuth endpoints: `/.well-known/oauth-protected-resource[/mcp]`,
+`/.well-known/oauth-authorization-server`, `/oauth/register`, `/oauth/authorize`, `/oauth/token`.
 
 ## MCP tools (same logic as the API)
 
 `list_boards`, `post_briefing`, `list_lists`, `create_list`, `list_open_items`,
 `add_items`, `update_item`, `push_inbox`, `set_widget`, `propose_timeboxes`.
+
+Streamable HTTP at `/mcp` (official Go SDK, stateless, JSON responses). Boards can be named
+by name or id; with a single-board token the board may be omitted. Lists default to the
+board's "Today". Unauthenticated calls get `401` with `WWW-Authenticate: Bearer
+resource_metadata=…` so connectors discover OAuth. Sample routine prompt:
+[docs/routines/morning-brief.md](routines/morning-brief.md).
 
 ## Background jobs (inside the binary)
 
@@ -109,6 +140,8 @@ PUT   /api/boards/{board}/days/{date}/timeboxes
    only): `GET /api/me`, `GET /api/boards`, `GET /api/boards/{board}/lists`,
    `GET|POST /api/lists/{list}/items`, `PATCH /api/items/{id}` (done, title).
 2. API + tokens + MCP server; a sample Claude routine prompt that posts a briefing.
+   **Done 2026-10-10.** Also: OAuth for claude.ai connectors (see Decisions), Settings page
+   (MCP URL, tokens, connected apps), and the Morning brief tile shows the latest briefing.
 3. Outdoors tile UI: brief, progress, lists, Jira/calendar widgets, inbox triage, themes.
 4. Timeboxes ("Your day"), carry-over job, carry-over review.
 5. Sharing and roles, drag-and-drop layouts, phone layout.

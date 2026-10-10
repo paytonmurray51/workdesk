@@ -10,7 +10,8 @@ MCP tools and milestones. Update it when a decision changes.
 - Keep it lightweight: one Go binary (UI + REST API + MCP), SQLite, embedded Preact frontend,
   one small container. Don't add services (Redis, Postgres, queues) without asking.
 - Never commit secrets. Settings come from `.env` (gitignored); keep `.env.example` current.
-- API tokens are stored hashed and scoped to one board.
+- API tokens are stored hashed and scoped to one board. OAuth grants (MCP connectors) are
+  hashed too and limited to the boards picked at consent. Neither can manage tokens.
 - Posts from Claude must be idempotent (upsert by `source_id`).
 - UI follows the "Option C, outdoors" design: CSS variables for the night/day themes,
   touch targets >= 44px, real buttons/labels.
