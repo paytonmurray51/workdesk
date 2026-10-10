@@ -73,6 +73,8 @@ POST   /api/boards/{board}/briefings             {markdown, stats, source_id}
 GET    /api/boards/{board}/briefings/latest
 POST   /api/boards/{board}/inbox                 one or many, upsert by source_id
 GET    /api/boards/{board}/inbox?status=new
+PATCH  /api/inbox/{id}                           {status: new|snoozed|dismissed, until}
+POST   /api/inbox/{id}/add                       {list_id}; default Today, same board only
 PUT    /api/boards/{board}/widgets/{name}        body = JSON payload
 GET    /api/boards/{board}/widgets
 PUT    /api/boards/{board}/days/{date}/timeboxes array or {boxes: [...]}, replaces the day
@@ -143,6 +145,13 @@ resource_metadata=…` so connectors discover OAuth. Sample routine prompt:
    **Done 2026-10-10.** Also: OAuth for claude.ai connectors (see Decisions), Settings page
    (MCP URL, tokens, connected apps), and the Morning brief tile shows the latest briefing.
 3. Outdoors tile UI: brief, progress, lists, Jira/calendar widgets, inbox triage, themes.
+   **Done 2026-10-10.** 12-column tile grid (single column on phones), refresh every minute
+   and on tab focus. Inbox triage: Add to Today / Snooze (until 7:00 tomorrow, board time
+   zone; `inbox_items.snoozed_until`) / Dismiss, via `PATCH /api/inbox/{id}` and
+   `POST /api/inbox/{id}/add`. Widget payloads the UI understands:
+   - `calendar`: `{date, events: [{title, start "HH:MM", end, location, url, id}]}`
+   - `jira`: `{issues: [{key, summary, status, priority, due "YYYY-MM-DD", url}]}`
+   Calendar/Jira tiles appear once a routine has posted them.
 4. Timeboxes ("Your day"), carry-over job, carry-over review.
 5. Sharing and roles, drag-and-drop layouts, phone layout.
 6. Proxmox install script, systemd unit, release workflow, backups.
