@@ -4,3 +4,7 @@
 /data/
 /dist/
 node_modules/
+
+# Built frontend (embedded at build time)
+web/dist/*
+!web/dist/.gitkeep
