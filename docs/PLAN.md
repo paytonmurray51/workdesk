@@ -78,16 +78,16 @@ PUT   /api/boards/{board}/days/{date}/timeboxes
   (~20 MB image, ~30 MB RAM), run with `docker compose`. Data in a named volume
   (`workdesk-data:/data`, SQLite file `/data/workdesk.db`). Settings via `.env`
   (Google OAuth client, session secret, base URL, time zone).
-- Public hostname `workdesk.voodootechlabs.com` through Cloudflare Tunnel, either a route on an
-  existing `cloudflared` container or a `cloudflared` service in the same compose file.
-  Needed so cloud Claude routines can reach the API and MCP server.
+- Public hostname `workdesk.voodootechlabs.com` as a new public-hostname route on the
+  existing `cloudflared` container on docker-host (workdesk joins its Docker network; no
+  host port needs to be published). Needed so cloud Claude routines can reach the API and MCP.
 - Updates: GitHub Actions builds and pushes the image to GHCR (private) on each tag;
   `docker compose pull && docker compose up -d` on the VM.
 - Backups: Proxmox vzdump of the VM, plus nightly SQLite copies inside the data volume.
 
 ## Work board schedule defaults
 
-- Workday 7:00 – 3:30 (some days to 4:00), lunch hour, 15 min buffer after meetings,
+- Time zone America/Chicago. Workday 7:00 – 3:30 (some days to 4:00), lunch hour, 15 min buffer after meetings,
   last 15 min = wrap-up and carry-over. Editable per board.
 
 ## Milestones

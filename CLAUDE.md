@@ -20,4 +20,4 @@ MCP tools and milestones. Update it when a decision changes.
 - Deploy target: `docker-host` VM, 192.168.50.85, AMD64, alongside other containers.
 - Proxmox host: 192.168.50.115 (read-only API token `claude@pve!readonly`, secret kept on the
   VM in `~/.config/proxmox/env`, never in the repo).
-- Work board schedule: 7:00–3:30 (sometimes 4:00). Time zone: TBD.
+- Work board schedule: 7:00–3:30 (sometimes 4:00). Time zone: America/Chicago (US Central).
