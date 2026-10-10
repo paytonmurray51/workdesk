@@ -245,6 +245,8 @@ type InboxItem struct {
 	Status    string  `json:"status"`
 	SourceID  *string `json:"source_id"`
 	CreatedAt string  `json:"created_at"`
+	// SnoozedUntil is set while status is "snoozed"; the item returns as "new" after it.
+	SnoozedUntil *string `json:"snoozed_until"`
 }
 
 type NewInboxItem struct {
@@ -256,12 +258,12 @@ type NewInboxItem struct {
 	SourceID string `json:"source_id"`
 }
 
-const inboxCols = `id, board_id, type, title, snippet, url, reason, status, source_id, created_at`
+const inboxCols = `id, board_id, type, title, snippet, url, reason, status, source_id, created_at, snoozed_until`
 
 func scanInbox(sc interface{ Scan(...any) error }) (InboxItem, error) {
 	var it InboxItem
 	err := sc.Scan(&it.ID, &it.BoardID, &it.Type, &it.Title, &it.Snippet, &it.URL, &it.Reason,
-		&it.Status, &it.SourceID, &it.CreatedAt)
+		&it.Status, &it.SourceID, &it.CreatedAt, &it.SnoozedUntil)
 	return it, err
 }
 
@@ -300,6 +302,11 @@ func (s *Store) PushInbox(ctx context.Context, boardID int64, in []NewInboxItem)
 
 // Inbox lists a board's inbox items, optionally filtered by status, newest first.
 func (s *Store) Inbox(ctx context.Context, boardID int64, status string) ([]InboxItem, error) {
+	// Wake snoozed items whose time has come.
+	if _, err := s.DB.ExecContext(ctx, `UPDATE inbox_items SET status = 'new', snoozed_until = NULL
+		WHERE board_id = ? AND status = 'snoozed' AND snoozed_until <= ?`, boardID, now().Format(timeFmt)); err != nil {
+		return nil, err
+	}
 	q := `SELECT ` + inboxCols + ` FROM inbox_items WHERE board_id = ?`
 	args := []any{boardID}
 	if status != "" {
@@ -320,6 +327,58 @@ func (s *Store) Inbox(ctx context.Context, boardID int64, status string) ([]Inbo
 		out = append(out, it)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) InboxItem(ctx context.Context, id int64) (*InboxItem, error) {
+	it, err := scanInbox(s.DB.QueryRowContext(ctx, `SELECT `+inboxCols+` FROM inbox_items WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &it, err
+}
+
+// SetInboxStatus triages an inbox item. "snoozed" needs a future until; other statuses clear it.
+func (s *Store) SetInboxStatus(ctx context.Context, id int64, status string, until time.Time) (*InboxItem, error) {
+	var snooze *string
+	switch status {
+	case "snoozed":
+		if !until.After(now()) {
+			return nil, ErrInvalid
+		}
+		u := until.UTC().Format(timeFmt)
+		snooze = &u
+	case "new", "added", "dismissed":
+	default:
+		return nil, ErrInvalid
+	}
+	it, err := scanInbox(s.DB.QueryRowContext(ctx, `
+		UPDATE inbox_items SET status = ?, snoozed_until = ?, updated_at = ? WHERE id = ?
+		RETURNING `+inboxCols, status, snooze, now().Format(timeFmt), id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &it, err
+}
+
+// InboxToList turns an inbox entry into a to-do on a list (keeping its source link, so a
+// later post of the same source_id updates that to-do) and marks the entry "added".
+func (s *Store) InboxToList(ctx context.Context, inboxID, listID int64) (*Item, error) {
+	in, err := s.InboxItem(ctx, inboxID)
+	if err != nil {
+		return nil, err
+	}
+	n := NewItem{Title: in.Title, SourceType: in.Type, SourceURL: in.URL}
+	if in.SourceID != nil {
+		n.SourceID = *in.SourceID
+	}
+	items, err := s.AddItems(ctx, listID, []NewItem{n})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.SetInboxStatus(ctx, inboxID, "added", time.Time{}); err != nil {
+		return nil, err
+	}
+	return &items[0], nil
 }
 
 // Widgets

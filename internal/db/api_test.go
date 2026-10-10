@@ -193,3 +193,44 @@ func TestTimeboxesReplaceDay(t *testing.T) {
 		t.Fatalf("after rejects: %d boxes", len(boxes))
 	}
 }
+
+func TestInboxTriage(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	t0 := time.Date(2026, 10, 12, 14, 0, 0, 0, time.UTC)
+	setNow(t, t0)
+	in, _ := s.PushInbox(ctx, 1, []NewInboxItem{
+		{Type: "email", Title: "Reply to Sam", URL: "https://mail/1", SourceID: "m-1"},
+		{Title: "Later"},
+		{Title: "Noise"},
+	})
+
+	list := todayList(t, s, "Work")
+	item, err := s.InboxToList(ctx, in[0].ID, list)
+	if err != nil || item.Title != "Reply to Sam" || item.SourceType != "email" || *item.SourceID != "m-1" || item.SourceURL != "https://mail/1" {
+		t.Fatalf("to list = %+v %v", item, err)
+	}
+	if got, _ := s.InboxItem(ctx, in[0].ID); got.Status != "added" {
+		t.Fatalf("status after add = %s", got.Status)
+	}
+
+	if _, err := s.SetInboxStatus(ctx, in[1].ID, "snoozed", t0.Add(-time.Minute)); !errors.Is(err, ErrInvalid) {
+		t.Fatal("snooze into the past allowed")
+	}
+	if _, err := s.SetInboxStatus(ctx, in[1].ID, "snoozed", t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	s.SetInboxStatus(ctx, in[2].ID, "dismissed", time.Time{})
+	if _, err := s.SetInboxStatus(ctx, in[2].ID, "archived", time.Time{}); !errors.Is(err, ErrInvalid) {
+		t.Fatal("unknown status allowed")
+	}
+
+	if n, _ := s.Inbox(ctx, 1, "new"); len(n) != 0 {
+		t.Fatalf("new while snoozed = %+v", n)
+	}
+	setNow(t, t0.Add(2*time.Hour))
+	n, _ := s.Inbox(ctx, 1, "new")
+	if len(n) != 1 || n[0].Title != "Later" || n[0].SnoozedUntil != nil {
+		t.Fatalf("after snooze = %+v", n)
+	}
+}

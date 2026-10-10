@@ -21,6 +21,8 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/boards/{board}/briefings/latest", s.authed(s.latestBriefing))
 	mux.Handle("POST /api/boards/{board}/inbox", s.authed(s.pushInbox))
 	mux.Handle("GET /api/boards/{board}/inbox", s.authed(s.listInbox))
+	mux.Handle("PATCH /api/inbox/{id}", s.authed(s.patchInbox))
+	mux.Handle("POST /api/inbox/{id}/add", s.authed(s.inboxToList))
 	mux.Handle("PUT /api/boards/{board}/widgets/{name}", s.authed(s.putWidget))
 	mux.Handle("GET /api/boards/{board}/widgets", s.authed(s.listWidgets))
 	mux.Handle("PUT /api/boards/{board}/days/{date}/timeboxes", s.authed(s.putTimeboxes))
@@ -235,6 +237,84 @@ func (s *Server) listInbox(w http.ResponseWriter, r *http.Request, p *principal)
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+// inboxFor loads an inbox item whose board the principal may use.
+func (s *Server) inboxFor(w http.ResponseWriter, r *http.Request, p *principal) (*db.InboxItem, *db.Board, bool) {
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return nil, nil, false
+	}
+	it, err := s.store.InboxItem(r.Context(), id)
+	var b *db.Board
+	if err == nil {
+		b, err = s.board(r.Context(), p, it.BoardID)
+	}
+	if err != nil {
+		writeStoreErr(w, err)
+		return nil, nil, false
+	}
+	return it, b, true
+}
+
+// patchInbox triages an item: {"status": "dismissed" | "new" | "snoozed", "until": RFC 3339}.
+// Snoozing without "until" means 7:00 tomorrow in the board's time zone.
+func (s *Server) patchInbox(w http.ResponseWriter, r *http.Request, p *principal) {
+	it, b, ok := s.inboxFor(w, r, p)
+	if !ok {
+		return
+	}
+	var in struct {
+		Status string    `json:"status"`
+		Until  time.Time `json:"until"`
+	}
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	if in.Status == "snoozed" && in.Until.IsZero() {
+		in.Until = db.StartOfDay(time.Now(), b.Timezone).AddDate(0, 0, 1).Add(7 * time.Hour)
+	}
+	updated, err := s.store.SetInboxStatus(r.Context(), it.ID, in.Status, in.Until)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// inboxToList adds an inbox item to a list ({"list_id": n}, default the board's Today).
+func (s *Server) inboxToList(w http.ResponseWriter, r *http.Request, p *principal) {
+	it, b, ok := s.inboxFor(w, r, p)
+	if !ok {
+		return
+	}
+	var in struct {
+		ListID int64 `json:"list_id"`
+	}
+	if r.ContentLength != 0 && !decodeBody(w, r, &in) {
+		return
+	}
+	var l *db.List
+	var err error
+	if in.ListID != 0 {
+		var lb *db.Board
+		l, lb, err = s.list(r.Context(), p, in.ListID)
+		if err == nil && lb.ID != b.ID {
+			err = db.ErrNotFound // keep inbox items on their own board
+		}
+	} else {
+		l, err = s.store.ListByName(r.Context(), b.ID, "Today")
+	}
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	item, err := s.store.InboxToList(r.Context(), it.ID, l.ID)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
 }
 
 // putWidget stores the request body as the widget's JSON payload.

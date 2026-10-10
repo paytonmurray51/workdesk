@@ -449,3 +449,40 @@ func TestMCPBoardTokenIsScoped(t *testing.T) {
 		t.Fatalf("default board add = %v", out)
 	}
 }
+
+func TestInboxTriageAPI(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin@example.com")
+	in := decode[[]db.InboxItem](t, h.do("POST", "/api/boards/1/inbox", `[{"type":"email","title":"Reply to Sam","source_id":"m-1"},{"title":"Later"},{"title":"Noise"}]`))
+
+	rec := h.do("POST", "/api/inbox/"+itoa(in[0].ID)+"/add", "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add = %d %s", rec.Code, rec.Body)
+	}
+	today := decode[[]db.Item](t, h.do("GET", "/api/lists/"+h.todayID("1")+"/items", ""))
+	if len(today) != 1 || today[0].Title != "Reply to Sam" {
+		t.Fatalf("today = %+v", today)
+	}
+	// Can't add an inbox item to another board's list.
+	if rec := h.do("POST", "/api/inbox/"+itoa(in[1].ID)+"/add", `{"list_id":`+h.todayID("2")+`}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-board add = %d", rec.Code)
+	}
+
+	rec = h.do("PATCH", "/api/inbox/"+itoa(in[1].ID), `{"status":"snoozed"}`)
+	if rec.Code != 200 || decode[db.InboxItem](t, rec).SnoozedUntil == nil {
+		t.Fatalf("snooze = %d %s", rec.Code, rec.Body)
+	}
+	h.do("PATCH", "/api/inbox/"+itoa(in[2].ID), `{"status":"dismissed"}`)
+	if rec := h.do("PATCH", "/api/inbox/"+itoa(in[2].ID), `{"status":"bogus"}`); rec.Code != 400 {
+		t.Fatalf("bad status = %d", rec.Code)
+	}
+	if n := decode[[]db.InboxItem](t, h.do("GET", "/api/boards/1/inbox?status=new", "")); len(n) != 0 {
+		t.Fatalf("new after triage = %+v", n)
+	}
+
+	// A board-2 token can't touch board-1 inbox items.
+	tok := h.newToken("2", "personal")
+	if rec := h.bearer(tok, "PATCH", "/api/inbox/"+itoa(in[1].ID), `{"status":"new"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("other board's inbox = %d", rec.Code)
+	}
+}
