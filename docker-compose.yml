@@ -1,0 +1,35 @@
+# workdesk on docker-host. Settings come from .env (see .env.example).
+#
+# cloudflared runs on Docker's default bridge network (no container-name DNS), like the
+# other services here it reaches workdesk through a host port: the tunnel's public hostname
+# points at http://172.17.0.1:8080 (the docker0 gateway). The port is bound only to
+# docker0 and loopback, so it is not exposed on the LAN.
+services:
+  workdesk:
+    build: .
+    image: workdesk:local
+    container_name: workdesk
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "172.17.0.1:8080:8080"
+    volumes:
+      - workdesk-data:/data
+    tmpfs:
+      - /tmp
+    read_only: true
+    # Runs as distroless "nonroot" (uid 65532) with no capabilities. no-new-privileges is
+    # left off: on docker-host it makes exec fail with "operation not permitted".
+    cap_drop: [ALL]
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "/workdesk", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  workdesk-data:
+    name: workdesk-data
