@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'preact/hooks';
 import { api, ApiError } from './api.js';
 import { loadThemePref, saveThemePref, resolveTheme, applyTheme, nextPref } from './theme.js';
-import { Markdown } from './markdown.jsx';
+import { BriefTile, ProgressTile, ListTile, CalendarTile, JiraTile, InboxTile } from './tiles.jsx';
 import { Settings } from './settings.jsx';
 
 const BOARD_KEY = 'workdesk.board';
@@ -166,17 +166,32 @@ function Desk({ me, boards, themeButton }) {
   );
 }
 
+const REFRESH_MS = 60_000;
+
 function Board({ board, me }) {
-  const [today, setToday] = useState(null);
-  const [items, setItems] = useState(null);
+  const [lists, setLists] = useState(null);
+  const [items, setItems] = useState({}); // list id -> items
+  const [brief, setBrief] = useState(undefined);
+  const [widgets, setWidgets] = useState([]);
+  const [inbox, setInbox] = useState(null);
   const [error, setError] = useState('');
 
+  // Loads everything for the board. Claude posts in the background, so this runs on a
+  // timer and when the tab comes back into view.
   const load = useCallback(async () => {
     try {
-      const lists = await api.lists(board.id);
-      const t = lists.find((l) => l.name === 'Today') || lists[0];
-      setToday(t || null);
-      setItems(t ? await api.items(t.id) : []);
+      const [ls, br, ws, ib] = await Promise.all([
+        api.lists(board.id),
+        api.latestBriefing(board.id).catch((e) => (e.status === 404 ? null : Promise.reject(e))),
+        api.widgets(board.id),
+        api.inbox(board.id),
+      ]);
+      const its = await Promise.all(ls.map((l) => api.items(l.id)));
+      setLists(ls);
+      setItems(Object.fromEntries(ls.map((l, i) => [l.id, its[i]])));
+      setBrief(br);
+      setWidgets(ws);
+      setInbox(ib);
     } catch (e) {
       setError(e.message);
     }
@@ -184,27 +199,54 @@ function Board({ board, me }) {
 
   useEffect(() => {
     load();
+    const t = setInterval(() => document.visibilityState === 'visible' && load(), REFRESH_MS);
+    const onVis = () => document.visibilityState === 'visible' && load();
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onVis);
+    };
   }, [load]);
 
-  const add = async (title) => {
-    const [it] = await api.addItem(today.id, title);
-    setItems((xs) => [...xs, it]);
+  const setListItems = (listId, fn) => setItems((m) => ({ ...m, [listId]: fn(m[listId] || []) }));
+
+  const add = async (list, title) => {
+    const [it] = await api.addItem(list.id, title);
+    setListItems(list.id, (xs) => [...xs, it]);
   };
 
   const toggle = async (item) => {
     const done = !item.done;
-    setItems((xs) => xs.map((x) => (x.id === item.id ? { ...x, done } : x)));
+    setListItems(item.list_id, (xs) => xs.map((x) => (x.id === item.id ? { ...x, done } : x)));
     try {
       const updated = await api.setDone(item.id, done);
-      setItems((xs) => xs.map((x) => (x.id === item.id ? updated : x)));
+      setListItems(item.list_id, (xs) => xs.map((x) => (x.id === item.id ? updated : x)));
     } catch (e) {
-      setItems((xs) => xs.map((x) => (x.id === item.id ? item : x)));
+      setListItems(item.list_id, (xs) => xs.map((x) => (x.id === item.id ? item : x)));
       setError(e.message);
     }
   };
 
-  const done = items ? items.filter((i) => i.done).length : 0;
-  const total = items ? items.length : 0;
+  // Triage removes the entry right away and restores it if the server says no.
+  const triage = (fn) => async (entry) => {
+    setInbox((xs) => xs.filter((x) => x.id !== entry.id));
+    try {
+      const res = await fn(entry);
+      if (res && res.list_id) setListItems(res.list_id, (xs) => (xs.some((x) => x.id === res.id) ? xs : [...xs, res]));
+    } catch (e) {
+      setInbox((xs) => [entry, ...xs]);
+      setError(e.message);
+    }
+  };
+
+  const today = lists?.find((l) => l.name === 'Today') || lists?.[0];
+  const others = (lists || []).filter((l) => l !== today);
+  const todayItems = today ? items[today.id] : undefined;
+  const done = todayItems ? todayItems.filter((i) => i.done).length : 0;
+  const total = todayItems ? todayItems.length : 0;
+  const carried = todayItems ? todayItems.filter((i) => !i.done && i.carried_days > 0).length : 0;
+  const calendar = widgets.find((w) => w.name === 'calendar');
+  const jira = widgets.find((w) => w.name === 'jira');
 
   return (
     <div class="desk">
@@ -215,10 +257,23 @@ function Board({ board, me }) {
           <button type="button" class="btn ghost" onClick={() => setError('')}>Dismiss</button>
         </p>
       )}
-      <div class="tiles">
-        <BriefTile board={board} />
-        <ProgressTile done={done} total={total} loading={items === null} />
-        <TodayTile list={today} items={items} onAdd={add} onToggle={toggle} />
+      <div class="tiles grid">
+        <BriefTile board={board} brief={brief} />
+        <ProgressTile done={done} total={total} loading={lists === null} inboxCount={inbox?.length || 0} carried={carried} />
+        {today && <ListTile list={today} items={todayItems} onAdd={add} onToggle={toggle} wide />}
+        {calendar && <CalendarTile widget={calendar} board={board} />}
+        {(inbox === null || inbox.length > 0 || brief) && (
+          <InboxTile
+            items={inbox}
+            onAdd={triage((e) => api.inboxAdd(e.id))}
+            onSnooze={triage((e) => api.inboxStatus(e.id, 'snoozed'))}
+            onDismiss={triage((e) => api.inboxStatus(e.id, 'dismissed'))}
+          />
+        )}
+        {jira && <JiraTile widget={jira} board={board} />}
+        {others.map((l) => (
+          <ListTile key={l.id} list={l} items={items[l.id]} onAdd={add} onToggle={toggle} />
+        ))}
       </div>
     </div>
   );
@@ -241,164 +296,11 @@ function Hello({ board, me }) {
   );
 }
 
-function BriefTile({ board }) {
-  const [brief, setBrief] = useState(undefined);
-  useEffect(() => {
-    api.latestBriefing(board.id).then(setBrief, () => setBrief(null));
-  }, [board.id]);
-
-  const tz = board.timezone || undefined;
-  const day = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d);
-  const fresh = brief && day(new Date(brief.created_at)) === day(new Date());
-  const posted = brief && new Date(brief.updated_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: tz });
-
-  return (
-    <section class="tile brief" aria-labelledby="brief-h">
-      <header class="tile-head">
-        <h2 id="brief-h">Morning brief</h2>
-        {brief === undefined ? null : brief ? (
-          <span class={'chip' + (fresh ? '' : ' warn')}>{fresh ? `posted ${posted}` : 'from an earlier day'}</span>
-        ) : (
-          <span class="chip">waiting</span>
-        )}
-      </header>
-      {brief ? (
-        <Markdown text={brief.markdown} />
-      ) : (
-        <div class="brief-empty">
-          <Trail />
-          <p>{brief === undefined ? 'Loading…' : 'No brief yet today.'}</p>
-          <p class="muted small">Your morning Claude routine will post a summary of email, calendar and Jira here.</p>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function ProgressTile({ done, total, loading }) {
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  const r = 42;
-  const c = 2 * Math.PI * r;
-  return (
-    <section class="tile progress" aria-labelledby="progress-h">
-      <header class="tile-head">
-        <h2 id="progress-h">Progress</h2>
-      </header>
-      <div class="progress-body">
-        <svg viewBox="0 0 100 100" class="ring" role="img" aria-label={`${pct}% of today done`}>
-          <circle cx="50" cy="50" r={r} class="ring-track" />
-          <circle
-            cx="50" cy="50" r={r} class="ring-fill"
-            stroke-dasharray={`${(pct / 100) * c} ${c}`}
-            transform="rotate(-90 50 50)"
-          />
-          <text x="50" y="50" class="ring-text" text-anchor="middle" dominant-baseline="central">{pct}%</text>
-        </svg>
-        <div>
-          <p class="big">{loading ? '…' : `${done} of ${total}`}</p>
-          <p class="muted">
-            {loading ? 'Loading' : total === 0 ? 'Nothing planned yet' : done === total ? 'Summit reached. Nice.' : 'done today'}
-          </p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function TodayTile({ list, items, onAdd, onToggle }) {
-  const [title, setTitle] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  const submit = async (e) => {
-    e.preventDefault();
-    const t = title.trim();
-    if (!t || !list) return;
-    setBusy(true);
-    setErr('');
-    try {
-      await onAdd(t);
-      setTitle('');
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const open = (items || []).filter((i) => !i.done);
-  const done = (items || []).filter((i) => i.done);
-
-  return (
-    <section class="tile today" aria-labelledby="today-h">
-      <header class="tile-head">
-        <h2 id="today-h">{list ? list.name : 'Today'}</h2>
-        {items && <span class="chip">{open.length} open</span>}
-      </header>
-
-      <form class="add" onSubmit={submit}>
-        <label for="new-item" class="visually-hidden">New to-do</label>
-        <input
-          id="new-item"
-          type="text"
-          placeholder="Add a to-do…"
-          value={title}
-          maxLength={500}
-          autocomplete="off"
-          onInput={(e) => setTitle(e.currentTarget.value)}
-          disabled={!list}
-        />
-        <button type="submit" class="btn primary" disabled={busy || !title.trim() || !list}>Add</button>
-      </form>
-      {err && <p class="error small" role="alert">{err}</p>}
-
-      {items === null ? (
-        <p class="muted">Loading…</p>
-      ) : items.length === 0 ? (
-        <p class="muted empty">Clear trail ahead. Add the first thing you want to get done.</p>
-      ) : (
-        <ul class="items">
-          {[...open, ...done].map((it) => (
-            <Item key={it.id} item={it} onToggle={onToggle} />
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function Item({ item, onToggle }) {
-  const id = `item-${item.id}`;
-  return (
-    <li class={'item' + (item.done ? ' done' : '')}>
-      <input id={id} type="checkbox" checked={item.done} onChange={() => onToggle(item)} />
-      <label for={id}>
-        <span class="item-title">{item.title}</span>
-        {item.carried_days > 0 && <span class="chip warn">carried {item.carried_days}d</span>}
-      </label>
-      {item.source_url && (
-        <a class="btn ghost source" href={item.source_url} target="_blank" rel="noopener noreferrer" aria-label={`Open source for ${item.title}`}>
-          ↗
-        </a>
-      )}
-    </li>
-  );
-}
-
 function Peaks({ large }) {
   return (
     <svg class={'peaks' + (large ? ' large' : '')} viewBox="0 0 32 24" aria-hidden="true">
       <path d="M1 22 11 6l5 8 4-5 11 13z" class="peaks-hill" />
       <circle cx="24" cy="5" r="3" class="peaks-sun" />
-    </svg>
-  );
-}
-
-function Trail() {
-  return (
-    <svg class="trail" viewBox="0 0 120 48" aria-hidden="true">
-      <path d="M0 40 C 25 40, 30 18, 55 22 S 90 8, 120 10" class="trail-path" />
-      <circle cx="118" cy="10" r="3" class="trail-end" />
     </svg>
   );
 }
