@@ -37,8 +37,8 @@ type Google struct {
 	Secure                              bool
 
 	// OnLogin decides whether the identity may sign in and starts the session.
-	// It writes the response itself.
-	OnLogin func(w http.ResponseWriter, r *http.Request, id Identity)
+	// next is the local path to return to. It writes the response itself.
+	OnLogin func(w http.ResponseWriter, r *http.Request, id Identity, next string)
 
 	mu       sync.Mutex
 	provider *oidc.Provider
@@ -48,6 +48,16 @@ type loginState struct {
 	State    string `json:"s"`
 	Nonce    string `json:"n"`
 	Verifier string `json:"v"`
+	Next     string `json:"x,omitempty"`
+}
+
+// SafeNext keeps post-login redirects on this site: a local absolute path, else "/".
+func SafeNext(next string) string {
+	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.HasPrefix(next, "/\\") ||
+		strings.ContainsAny(next, "\r\n") {
+		return "/"
+	}
+	return next
 }
 
 func (g *Google) setup(ctx context.Context) (*oauth2.Config, *oidc.IDTokenVerifier, error) {
@@ -80,7 +90,8 @@ func (g *Google) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Google sign-in is unavailable right now. Try again shortly.", http.StatusBadGateway)
 		return
 	}
-	st := loginState{State: randString(), Nonce: randString(), Verifier: oauth2.GenerateVerifier()}
+	st := loginState{State: randString(), Nonce: randString(), Verifier: oauth2.GenerateVerifier(),
+		Next: SafeNext(r.URL.Query().Get("next"))}
 	v, err := g.Signer.Seal(st, stateTTL)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -97,7 +108,7 @@ func (g *Google) Login(w http.ResponseWriter, r *http.Request) {
 
 // Callback finishes the flow: checks state, exchanges the code, verifies the ID token.
 func (g *Google) Callback(w http.ResponseWriter, r *http.Request) {
-	id, err := g.callback(r)
+	id, next, err := g.callback(r)
 	http.SetCookie(w, &http.Cookie{Name: stateCookie, Value: "", Path: "/auth/", MaxAge: -1,
 		HttpOnly: true, Secure: g.Secure, SameSite: http.SameSiteLaxMode})
 	if err != nil {
@@ -105,42 +116,42 @@ func (g *Google) Callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Sign-in failed. Go back and try again.", http.StatusBadRequest)
 		return
 	}
-	g.OnLogin(w, r, id)
+	g.OnLogin(w, r, id, next)
 }
 
-func (g *Google) callback(r *http.Request) (Identity, error) {
+func (g *Google) callback(r *http.Request) (Identity, string, error) {
 	if e := r.URL.Query().Get("error"); e != "" {
-		return Identity{}, fmt.Errorf("google returned error %q", e)
+		return Identity{}, "", fmt.Errorf("google returned error %q", e)
 	}
 	c, err := r.Cookie(stateCookie)
 	if err != nil {
-		return Identity{}, errors.New("missing state cookie")
+		return Identity{}, "", errors.New("missing state cookie")
 	}
 	var st loginState
 	if err := g.Signer.Open(c.Value, &st); err != nil {
-		return Identity{}, errors.New("bad or expired state cookie")
+		return Identity{}, "", errors.New("bad or expired state cookie")
 	}
 	if r.URL.Query().Get("state") != st.State {
-		return Identity{}, errors.New("state mismatch")
+		return Identity{}, "", errors.New("state mismatch")
 	}
 	conf, verifier, err := g.setup(r.Context())
 	if err != nil {
-		return Identity{}, err
+		return Identity{}, "", err
 	}
 	tok, err := conf.Exchange(r.Context(), r.URL.Query().Get("code"), oauth2.VerifierOption(st.Verifier))
 	if err != nil {
-		return Identity{}, fmt.Errorf("code exchange: %w", err)
+		return Identity{}, "", fmt.Errorf("code exchange: %w", err)
 	}
 	raw, ok := tok.Extra("id_token").(string)
 	if !ok {
-		return Identity{}, errors.New("no id_token in response")
+		return Identity{}, "", errors.New("no id_token in response")
 	}
 	idt, err := verifier.Verify(r.Context(), raw)
 	if err != nil {
-		return Identity{}, fmt.Errorf("verify id_token: %w", err)
+		return Identity{}, "", fmt.Errorf("verify id_token: %w", err)
 	}
 	if idt.Nonce != st.Nonce {
-		return Identity{}, errors.New("nonce mismatch")
+		return Identity{}, "", errors.New("nonce mismatch")
 	}
 	var claims struct {
 		Email         string `json:"email"`
@@ -148,12 +159,12 @@ func (g *Google) callback(r *http.Request) (Identity, error) {
 		Name          string `json:"name"`
 	}
 	if err := idt.Claims(&claims); err != nil {
-		return Identity{}, err
+		return Identity{}, "", err
 	}
 	if claims.Email == "" || !claims.EmailVerified {
-		return Identity{}, errors.New("google account email is not verified")
+		return Identity{}, "", errors.New("google account email is not verified")
 	}
-	return Identity{Sub: idt.Subject, Email: strings.ToLower(claims.Email), Name: claims.Name}, nil
+	return Identity{Sub: idt.Subject, Email: strings.ToLower(claims.Email), Name: claims.Name}, st.Next, nil
 }
 
 func randString() string {

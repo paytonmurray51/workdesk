@@ -1,4 +1,5 @@
-// Package server wires the HTTP routes: health, Google sign-in, the REST API and the UI.
+// Package server wires the HTTP routes: health, Google sign-in, the REST API, OAuth for
+// MCP connectors, the MCP server and the UI.
 package server
 
 import (
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/paytonmurray51/workdesk/internal/auth"
 	"github.com/paytonmurray51/workdesk/internal/config"
 	"github.com/paytonmurray51/workdesk/internal/db"
@@ -23,8 +26,10 @@ type Server struct {
 	cfg      *config.Config
 	store    *db.Store
 	sessions *auth.Sessions
+	signer   *auth.Signer
 	google   *auth.Google
 	ui       fs.FS
+	schemas  *mcp.SchemaCache
 }
 
 func New(cfg *config.Config, store *db.Store, ui fs.FS) *Server {
@@ -33,7 +38,9 @@ func New(cfg *config.Config, store *db.Store, ui fs.FS) *Server {
 		cfg:      cfg,
 		store:    store,
 		sessions: &auth.Sessions{Signer: signer, Secure: cfg.Secure()},
+		signer:   signer,
 		ui:       ui,
+		schemas:  mcp.NewSchemaCache(),
 	}
 	s.google = &auth.Google{
 		ClientID:     cfg.GoogleClientID,
@@ -54,21 +61,28 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /auth/callback", s.google.Callback)
 	mux.HandleFunc("POST /auth/logout", s.logout)
 
-	mux.Handle("GET /api/me", s.authed(s.me))
-	mux.Handle("GET /api/boards", s.authed(s.listBoards))
-	mux.Handle("GET /api/boards/{board}/lists", s.authed(s.listLists))
-	mux.Handle("GET /api/lists/{list}/items", s.authed(s.listItems))
-	mux.Handle("POST /api/lists/{list}/items", s.authed(s.addItems))
-	mux.Handle("PATCH /api/items/{id}", s.authed(s.patchItem))
+	s.apiRoutes(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 	})
-
 	mux.HandleFunc("/", s.serveUI)
 
-	// Rejects cross-site POST/PATCH (Sec-Fetch-Site / Origin checks) on top of SameSite=Lax.
-	csrf := http.NewCrossOriginProtection()
-	return securityHeaders(csrf.Handler(mux))
+	// The OAuth authorization server and the MCP endpoint are called server-to-server or
+	// by top-level navigation, so they sit outside the cross-origin check; the consent
+	// form checks its own origin and carries a signed request.
+	open := http.NewServeMux()
+	s.oauthRoutes(open)
+	open.Handle("/mcp", s.mcpHandler())
+
+	app := http.NewCrossOriginProtection().Handler(mux)
+	return securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/mcp" || strings.HasPrefix(p, "/oauth/") || strings.HasPrefix(p, "/.well-known/") {
+			open.ServeHTTP(w, r)
+			return
+		}
+		app.ServeHTTP(w, r)
+	}))
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -82,8 +96,9 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "ok\n")
 }
 
-// onLogin admits a verified Google identity. Milestone 1: only WORKDESK_ADMIN_EMAILS.
-func (s *Server) onLogin(w http.ResponseWriter, r *http.Request, id auth.Identity) {
+// onLogin admits a verified Google identity. Until invites (milestone 5), only
+// WORKDESK_ADMIN_EMAILS.
+func (s *Server) onLogin(w http.ResponseWriter, r *http.Request, id auth.Identity, next string) {
 	if !s.cfg.AdminEmails[id.Email] {
 		slog.Info("sign-in refused: not invited", "email", id.Email)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -102,7 +117,7 @@ func (s *Server) onLogin(w http.ResponseWriter, r *http.Request, id auth.Identit
 		return
 	}
 	slog.Info("signed in", "user", u.ID)
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, auth.SafeNext(next), http.StatusFound)
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
@@ -110,162 +125,36 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type viewer struct {
-	user  *db.User
-	admin bool
-}
+type apiHandler func(http.ResponseWriter, *http.Request, *principal)
 
-// authed requires a session for a user who is (still) allowed in.
-func (s *Server) authed(h func(http.ResponseWriter, *http.Request, viewer)) http.Handler {
+// authed requires any principal: session, board API token or OAuth access token.
+func (s *Server) authed(h apiHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := s.sessions.UserID(r)
-		if id == 0 {
-			writeErr(w, http.StatusUnauthorized, "sign in required")
-			return
-		}
-		u, err := s.store.UserByID(r.Context(), id)
-		if err != nil {
-			writeErr(w, http.StatusUnauthorized, "sign in required")
-			return
-		}
-		v := viewer{user: u, admin: s.cfg.AdminEmails[u.Email]}
-		if !v.admin {
-			// Invites arrive in milestone 5; until then only admins may use the app.
+		p, err := s.authenticate(r)
+		switch {
+		case errors.Is(err, errNotInvited):
 			writeErr(w, http.StatusForbidden, "not invited")
+		case err != nil:
+			if r.Header.Get("Authorization") != "" {
+				w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+			}
+			writeErr(w, http.StatusUnauthorized, "sign in required")
+		default:
+			h(w, r, p)
+		}
+	})
+}
+
+// sessionOnly is for settings a person changes in the UI (tokens, connected apps): a
+// token must never be able to mint or list other tokens.
+func (s *Server) sessionOnly(h apiHandler) http.Handler {
+	return s.authed(func(w http.ResponseWriter, r *http.Request, p *principal) {
+		if p.kind != "session" {
+			writeErr(w, http.StatusForbidden, "only available when signed in")
 			return
 		}
-		h(w, r, v)
+		h(w, r, p)
 	})
-}
-
-func (s *Server) me(w http.ResponseWriter, r *http.Request, v viewer) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id": v.user.ID, "email": v.user.Email, "name": v.user.Name, "admin": v.admin,
-	})
-}
-
-func (s *Server) listBoards(w http.ResponseWriter, r *http.Request, v viewer) {
-	boards, err := s.store.Boards(r.Context(), v.user.ID, v.admin)
-	if err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, boards)
-}
-
-func (s *Server) listLists(w http.ResponseWriter, r *http.Request, v viewer) {
-	id, ok := pathID(w, r, "board")
-	if !ok {
-		return
-	}
-	if _, err := s.store.Board(r.Context(), id, v.user.ID, v.admin); err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	lists, err := s.store.Lists(r.Context(), id)
-	if err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, lists)
-}
-
-// listFor loads a list and checks the viewer can see its board.
-func (s *Server) listFor(w http.ResponseWriter, r *http.Request, v viewer, id int64) (*db.List, *db.Board, bool) {
-	l, err := s.store.List(r.Context(), id)
-	if err != nil {
-		writeStoreErr(w, err)
-		return nil, nil, false
-	}
-	b, err := s.store.Board(r.Context(), l.BoardID, v.user.ID, v.admin)
-	if err != nil {
-		writeStoreErr(w, err)
-		return nil, nil, false
-	}
-	return l, b, true
-}
-
-func (s *Server) listItems(w http.ResponseWriter, r *http.Request, v viewer) {
-	id, ok := pathID(w, r, "list")
-	if !ok {
-		return
-	}
-	_, b, ok := s.listFor(w, r, v, id)
-	if !ok {
-		return
-	}
-	openOnly := r.URL.Query().Get("open") == "true"
-	items, err := s.store.Items(r.Context(), id, openOnly, db.StartOfDay(time.Now(), b.Timezone))
-	if err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, items)
-}
-
-// addItems accepts one item object or an array of them.
-func (s *Server) addItems(w http.ResponseWriter, r *http.Request, v viewer) {
-	id, ok := pathID(w, r, "list")
-	if !ok {
-		return
-	}
-	if _, _, ok := s.listFor(w, r, v, id); !ok {
-		return
-	}
-	body, err := readJSONBody(r)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var in []db.NewItem
-	if trimmed := strings.TrimSpace(string(body)); strings.HasPrefix(trimmed, "[") {
-		err = json.Unmarshal(body, &in)
-	} else {
-		var one db.NewItem
-		err = json.Unmarshal(body, &one)
-		in = []db.NewItem{one}
-	}
-	if err != nil || len(in) == 0 || len(in) > 200 {
-		writeErr(w, http.StatusBadRequest, "body must be an item or an array of 1-200 items")
-		return
-	}
-	items, err := s.store.AddItems(r.Context(), id, in)
-	if err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, items)
-}
-
-func (s *Server) patchItem(w http.ResponseWriter, r *http.Request, v viewer) {
-	id, ok := pathID(w, r, "id")
-	if !ok {
-		return
-	}
-	it, err := s.store.Item(r.Context(), id)
-	if err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	if _, _, ok := s.listFor(w, r, v, it.ListID); !ok {
-		return
-	}
-	body, err := readJSONBody(r)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var p db.ItemPatch
-	if err := json.Unmarshal(body, &p); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid JSON")
-		return
-	}
-	updated, err := s.store.UpdateItem(r.Context(), id, p)
-	if err != nil {
-		writeStoreErr(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, updated)
 }
 
 // serveUI serves built assets and falls back to index.html for client-side routes.
@@ -300,11 +189,13 @@ func (s *Server) serveUI(w http.ResponseWriter, r *http.Request) {
 	w.Write(index)
 }
 
+const defaultCSP = "default-src 'self'; img-src 'self' data: https://*.googleusercontent.com; " +
+	"style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+
 func securityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hd := w.Header()
-		hd.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data: https://*.googleusercontent.com; "+
-			"style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		hd.Set("Content-Security-Policy", defaultCSP)
 		hd.Set("X-Content-Type-Options", "nosniff")
 		hd.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.ServeHTTP(w, r)
@@ -316,6 +207,23 @@ func readJSONBody(r *http.Request) ([]byte, error) {
 		return nil, errors.New("Content-Type must be application/json")
 	}
 	return io.ReadAll(http.MaxBytesReader(nil, r.Body, 1<<20))
+}
+
+// decodeOneOrMany accepts a JSON object or an array of 1..max objects.
+func decodeOneOrMany[T any](body []byte, max int) ([]T, error) {
+	var out []T
+	var err error
+	if strings.HasPrefix(strings.TrimSpace(string(body)), "[") {
+		err = json.Unmarshal(body, &out)
+	} else {
+		var one T
+		err = json.Unmarshal(body, &one)
+		out = []T{one}
+	}
+	if err != nil || len(out) == 0 || len(out) > max {
+		return nil, errors.New("body must be an object or an array of 1-" + strconv.Itoa(max) + " objects")
+	}
+	return out, nil
 }
 
 func pathID(w http.ResponseWriter, r *http.Request, name string) (int64, bool) {
@@ -343,7 +251,9 @@ func writeStoreErr(w http.ResponseWriter, err error) {
 	case errors.Is(err, db.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not found")
 	case errors.Is(err, db.ErrInvalid):
-		writeErr(w, http.StatusBadRequest, "invalid input: title must be 1-500 characters")
+		writeErr(w, http.StatusBadRequest, "invalid input")
+	case errors.Is(err, db.ErrConflict):
+		writeErr(w, http.StatusConflict, "conflict")
 	default:
 		slog.Error("store", "err", err)
 		writeErr(w, http.StatusInternalServerError, "internal error")

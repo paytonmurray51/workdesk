@@ -47,7 +47,7 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) login(email string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	h.srv.onLogin(rec, httptest.NewRequest("GET", "/auth/callback", nil),
-		auth.Identity{Sub: "sub-" + email, Email: email, Name: "Test"})
+		auth.Identity{Sub: "sub-" + email, Email: email, Name: "Test"}, "/")
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == auth.SessionCookie {
 			h.cookie = c
@@ -141,7 +141,7 @@ func TestTodayFlow(t *testing.T) {
 	if len(lists) != 1 || lists[0].Name != "Today" {
 		t.Fatalf("lists = %+v", lists)
 	}
-	itemsURL := "/api/lists/1/items"
+	itemsURL := "/api/lists/" + itoa(lists[0].ID) + "/items"
 
 	rec := h.do("POST", itemsURL, `{"title":"Plan sprint"}`)
 	if rec.Code != http.StatusCreated {
