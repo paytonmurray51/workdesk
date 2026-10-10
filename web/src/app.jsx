@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from 'preact/hooks';
 import { api, ApiError } from './api.js';
 import { loadThemePref, saveThemePref, resolveTheme, applyTheme, nextPref } from './theme.js';
+import { Markdown } from './markdown.jsx';
+import { Settings } from './settings.jsx';
 
 const BOARD_KEY = 'workdesk.board';
 
@@ -100,9 +102,20 @@ function Desk({ me, boards, themeButton }) {
     return boards.some((b) => b.id === saved) ? saved : boards[0]?.id;
   });
   const board = boards.find((b) => b.id === boardId);
+  const [view, setView] = useState(() => (location.hash === '#settings' ? 'settings' : 'desk'));
+  useEffect(() => {
+    const onHash = () => setView(location.hash === '#settings' ? 'settings' : 'desk');
+    addEventListener('hashchange', onHash);
+    return () => removeEventListener('hashchange', onHash);
+  }, []);
+  const go = (v) => {
+    location.hash = v === 'settings' ? 'settings' : '';
+    setView(v);
+  };
 
   const pick = (id) => {
     setBoardId(id);
+    if (view !== 'desk') go('desk');
     try {
       localStorage.setItem(BOARD_KEY, String(id));
     } catch {}
@@ -118,8 +131,8 @@ function Desk({ me, boards, themeButton }) {
       {boards.map((b) => (
         <button
           type="button"
-          class={'btn board-tab' + (b.id === boardId ? ' active' : '')}
-          aria-pressed={b.id === boardId}
+          class={'btn board-tab' + (view === 'desk' && b.id === boardId ? ' active' : '')}
+          aria-pressed={view === 'desk' && b.id === boardId}
           onClick={() => pick(b.id)}
           style={{ '--board': b.color || 'var(--accent)' }}
         >
@@ -129,14 +142,26 @@ function Desk({ me, boards, themeButton }) {
     </nav>
   );
   const user = (
-    <button type="button" class="btn ghost" onClick={signOut} title={me.email}>
-      Sign out
-    </button>
+    <>
+      <button type="button" class={'btn ghost' + (view === 'settings' ? ' active-ghost' : '')}
+        aria-pressed={view === 'settings'} onClick={() => go(view === 'settings' ? 'desk' : 'settings')}>
+        Settings
+      </button>
+      <button type="button" class="btn ghost" onClick={signOut} title={me.email}>
+        Sign out
+      </button>
+    </>
   );
 
   return (
     <Shell themeButton={themeButton} nav={nav} user={user}>
-      {board ? <Board key={board.id} board={board} me={me} /> : <p class="center muted">No boards yet.</p>}
+      {view === 'settings' ? (
+        <Settings boards={boards} onBack={() => go('desk')} />
+      ) : board ? (
+        <Board key={board.id} board={board} me={me} />
+      ) : (
+        <p class="center muted">No boards yet.</p>
+      )}
     </Shell>
   );
 }
@@ -191,7 +216,7 @@ function Board({ board, me }) {
         </p>
       )}
       <div class="tiles">
-        <BriefTile />
+        <BriefTile board={board} />
         <ProgressTile done={done} total={total} loading={items === null} />
         <TodayTile list={today} items={items} onAdd={add} onToggle={toggle} />
       </div>
@@ -216,18 +241,36 @@ function Hello({ board, me }) {
   );
 }
 
-function BriefTile() {
+function BriefTile({ board }) {
+  const [brief, setBrief] = useState(undefined);
+  useEffect(() => {
+    api.latestBriefing(board.id).then(setBrief, () => setBrief(null));
+  }, [board.id]);
+
+  const tz = board.timezone || undefined;
+  const day = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(d);
+  const fresh = brief && day(new Date(brief.created_at)) === day(new Date());
+  const posted = brief && new Date(brief.updated_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: tz });
+
   return (
     <section class="tile brief" aria-labelledby="brief-h">
       <header class="tile-head">
         <h2 id="brief-h">Morning brief</h2>
-        <span class="chip">waiting</span>
+        {brief === undefined ? null : brief ? (
+          <span class={'chip' + (fresh ? '' : ' warn')}>{fresh ? `posted ${posted}` : 'from an earlier day'}</span>
+        ) : (
+          <span class="chip">waiting</span>
+        )}
       </header>
-      <div class="brief-empty">
-        <Trail />
-        <p>No brief yet today.</p>
-        <p class="muted small">Your morning Claude routine will post a summary of email, calendar and Jira here.</p>
-      </div>
+      {brief ? (
+        <Markdown text={brief.markdown} />
+      ) : (
+        <div class="brief-empty">
+          <Trail />
+          <p>{brief === undefined ? 'Loading…' : 'No brief yet today.'}</p>
+          <p class="muted small">Your morning Claude routine will post a summary of email, calendar and Jira here.</p>
+        </div>
+      )}
     </section>
   );
 }

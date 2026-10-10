@@ -26,5 +26,11 @@ export const api = {
   items: (listId) => request('GET', `/api/lists/${listId}/items`),
   addItem: (listId, title) => request('POST', `/api/lists/${listId}/items`, { title }),
   setDone: (id, done) => request('PATCH', `/api/items/${id}`, { done }),
+  latestBriefing: (boardId) => request('GET', `/api/boards/${boardId}/briefings/latest`),
+  tokens: (boardId) => request('GET', `/api/boards/${boardId}/tokens`),
+  createToken: (boardId, name) => request('POST', `/api/boards/${boardId}/tokens`, { name }),
+  deleteToken: (id) => request('DELETE', `/api/tokens/${id}`),
+  connections: () => request('GET', '/api/connections'),
+  disconnect: (id) => request('DELETE', `/api/connections/${id}`),
   logout: () => request('POST', '/auth/logout'),
 };
