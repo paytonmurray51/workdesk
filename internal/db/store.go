@@ -244,11 +244,13 @@ func (s *Store) AddItems(ctx context.Context, listID int64, in []NewItem) ([]Ite
 
 // ItemPatch holds optional changes; nil fields are left alone.
 type ItemPatch struct {
-	Done  *bool   `json:"done"`
-	Title *string `json:"title"`
+	Done   *bool   `json:"done"`
+	Title  *string `json:"title"`
+	ListID *int64  `json:"list_id"` // move to another list (caller checks access)
 }
 
-// UpdateItem checks/unchecks or renames an item. Checking sets done_at; unchecking clears it.
+// UpdateItem checks/unchecks, renames or moves an item. Checking sets done_at; unchecking
+// clears it. A moved item goes to the end of the target list.
 func (s *Store) UpdateItem(ctx context.Context, id int64, p ItemPatch) (*Item, error) {
 	sets := []string{"updated_at = ?"}
 	ts := now().Format(timeFmt)
@@ -270,11 +272,19 @@ func (s *Store) UpdateItem(ctx context.Context, id int64, p ItemPatch) (*Item, e
 			sets = append(sets, "done = 0", "done_at = NULL")
 		}
 	}
+	if p.ListID != nil {
+		sets = append(sets, "position = CASE WHEN list_id = ? THEN position ELSE "+
+			"(SELECT coalesce(max(position), -1) + 1 FROM items WHERE list_id = ?) END", "list_id = ?")
+		args = append(args, *p.ListID, *p.ListID, *p.ListID)
+	}
 	args = append(args, id)
 	it, err := scanItem(s.DB.QueryRowContext(ctx,
 		`UPDATE items SET `+strings.Join(sets, ", ")+` WHERE id = ? RETURNING `+itemCols, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
+	}
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		return nil, ErrConflict
 	}
 	if err != nil {
 		return nil, err
