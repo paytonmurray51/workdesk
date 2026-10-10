@@ -234,3 +234,40 @@ func TestInboxTriage(t *testing.T) {
 		t.Fatalf("after snooze = %+v", n)
 	}
 }
+
+func TestClearBoard(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	u, _ := s.UpsertUser(ctx, "sub", "a@example.com", "A")
+	work, personal := todayList(t, s, "Work"), todayList(t, s, "Personal")
+	backlog, _, _ := s.CreateList(ctx, 1, "Backlog", "standing")
+	s.AddItems(ctx, work, []NewItem{{Title: "a"}, {Title: "b"}})
+	s.AddItems(ctx, backlog.ID, []NewItem{{Title: "c"}})
+	s.AddItems(ctx, personal, []NewItem{{Title: "keep me"}})
+	s.PostBriefing(ctx, 1, NewBriefing{Markdown: "x"})
+	s.PostBriefing(ctx, 2, NewBriefing{Markdown: "keep"})
+	s.PushInbox(ctx, 1, []NewInboxItem{{Title: "x"}})
+	s.SetWidget(ctx, 1, "calendar", json.RawMessage(`{}`))
+	s.SetTimeboxes(ctx, 1, "2026-10-12", []NewTimebox{{Start: "09:00", End: "10:00", Kind: "task", Title: "x"}})
+	tok, secret, _ := s.CreateAPIToken(ctx, 1, u.ID, "routine")
+
+	c, err := s.ClearBoard(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *c != (ClearCounts{Items: 3, Briefings: 1, Inbox: 1, Widgets: 1, Timeboxes: 1}) {
+		t.Fatalf("counts = %+v", c)
+	}
+	if lists, _ := s.Lists(ctx, 1); len(lists) != 2 {
+		t.Fatalf("lists should stay, got %d", len(lists))
+	}
+	if got, err := s.VerifyAPIToken(ctx, secret); err != nil || got.ID != tok.ID {
+		t.Fatal("tokens should stay")
+	}
+	if items, _ := s.Items(ctx, personal, true, time.Time{}); len(items) != 1 {
+		t.Fatal("other board's items were touched")
+	}
+	if _, err := s.LatestBriefing(ctx, 2); err != nil {
+		t.Fatal("other board's briefing was touched")
+	}
+}

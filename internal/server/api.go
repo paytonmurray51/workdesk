@@ -1,7 +1,11 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -23,6 +27,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/boards/{board}/inbox", s.authed(s.listInbox))
 	mux.Handle("PATCH /api/inbox/{id}", s.authed(s.patchInbox))
 	mux.Handle("POST /api/inbox/{id}/add", s.authed(s.inboxToList))
+	mux.Handle("POST /api/boards/{board}/clear", s.authed(s.postClear))
 	mux.Handle("PUT /api/boards/{board}/widgets/{name}", s.authed(s.putWidget))
 	mux.Handle("GET /api/boards/{board}/widgets", s.authed(s.listWidgets))
 	mux.Handle("PUT /api/boards/{board}/days/{date}/timeboxes", s.authed(s.putTimeboxes))
@@ -315,6 +320,46 @@ func (s *Server) inboxToList(w http.ResponseWriter, r *http.Request, p *principa
 		return
 	}
 	writeJSON(w, http.StatusCreated, item)
+}
+
+// postClear erases everything posted to the board. Body: {"confirm": "<exact board name>"}.
+func (s *Server) postClear(w http.ResponseWriter, r *http.Request, p *principal) {
+	b, ok := s.pathBoard(w, r, p)
+	if !ok {
+		return
+	}
+	var in struct {
+		Confirm string `json:"confirm"`
+	}
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	c, err := s.clearBoard(r.Context(), p, b, in.Confirm)
+	if errors.Is(err, errConfirm) {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+var errConfirm = errors.New(`confirm must be the board's exact name`)
+
+// clearBoard is shared by REST and MCP: checks the confirmation, erases, logs who did it.
+func (s *Server) clearBoard(ctx context.Context, p *principal, b *db.Board, confirm string) (*db.ClearCounts, error) {
+	if confirm != b.Name {
+		return nil, fmt.Errorf("%w (%q)", errConfirm, b.Name)
+	}
+	c, err := s.store.ClearBoard(ctx, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	slog.Warn("board cleared", "board", b.ID, "name", b.Name, "by", p.kind+":"+p.label,
+		"items", c.Items, "briefings", c.Briefings, "inbox", c.Inbox, "widgets", c.Widgets, "timeboxes", c.Timeboxes)
+	return c, nil
 }
 
 // putWidget stores the request body as the widget's JSON payload.

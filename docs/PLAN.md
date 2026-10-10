@@ -90,7 +90,11 @@ OAuth endpoints: `/.well-known/oauth-protected-resource[/mcp]`,
 ## MCP tools (same logic as the API)
 
 `list_boards`, `post_briefing`, `list_lists`, `create_list`, `list_open_items`,
-`add_items`, `update_item`, `push_inbox`, `set_widget`, `propose_timeboxes`.
+`add_items`, `update_item`, `push_inbox`, `set_widget`, `propose_timeboxes`,
+`clear_board` (added 2026-10-10: erases a board's items, briefings, inbox, widgets and
+timeboxes; keeps the board, lists, tokens and connections; `confirm` must be the exact board
+name; annotated destructive; no undo; logged with who did it. REST:
+`POST /api/boards/{board}/clear {confirm}`).
 
 Streamable HTTP at `/mcp` (official Go SDK, stateless, JSON responses). Boards can be named
 by name or id; with a single-board token the board may be omitted. Lists default to the

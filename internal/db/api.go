@@ -381,6 +381,43 @@ func (s *Store) InboxToList(ctx context.Context, inboxID, listID int64) (*Item, 
 	return &items[0], nil
 }
 
+// ClearCounts reports how many rows ClearBoard removed.
+type ClearCounts struct {
+	Items     int64 `json:"items"`
+	Briefings int64 `json:"briefings"`
+	Inbox     int64 `json:"inbox"`
+	Widgets   int64 `json:"widgets"`
+	Timeboxes int64 `json:"timeboxes"`
+}
+
+// ClearBoard erases everything posted to a board: list items, briefings, inbox, widgets and
+// timeboxes. The board, its lists, API tokens and OAuth grants stay. There is no undo.
+func (s *Store) ClearBoard(ctx context.Context, boardID int64) (*ClearCounts, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	c := &ClearCounts{}
+	for _, q := range []struct {
+		sql string
+		n   *int64
+	}{
+		{`DELETE FROM items WHERE list_id IN (SELECT id FROM lists WHERE board_id = ?)`, &c.Items},
+		{`DELETE FROM briefings WHERE board_id = ?`, &c.Briefings},
+		{`DELETE FROM inbox_items WHERE board_id = ?`, &c.Inbox},
+		{`DELETE FROM widgets WHERE board_id = ?`, &c.Widgets},
+		{`DELETE FROM timeboxes WHERE board_id = ?`, &c.Timeboxes},
+	} {
+		res, err := tx.ExecContext(ctx, q.sql, boardID)
+		if err != nil {
+			return nil, err
+		}
+		*q.n, _ = res.RowsAffected()
+	}
+	return c, tx.Commit()
+}
+
 // Widgets
 
 type Widget struct {

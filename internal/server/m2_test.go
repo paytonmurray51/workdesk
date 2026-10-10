@@ -486,3 +486,58 @@ func TestInboxTriageAPI(t *testing.T) {
 		t.Fatalf("other board's inbox = %d", rec.Code)
 	}
 }
+
+func TestClearBoard(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin@example.com")
+	work := h.todayID("1")
+	h.do("POST", "/api/lists/"+work+"/items", `[{"title":"a"},{"title":"b"}]`)
+	h.do("POST", "/api/boards/1/briefings", `{"markdown":"# x"}`)
+	h.do("POST", "/api/lists/"+h.todayID("2")+"/items", `{"title":"personal stays"}`)
+
+	_, tokens := h.oauthConnect("1", "2")
+	cs := mcpSession(t, h, tokens["access_token"].(string))
+
+	tools, _ := cs.ListTools(context.Background(), nil)
+	for _, tl := range tools.Tools {
+		if tl.Name == "clear_board" && (tl.Annotations == nil || tl.Annotations.DestructiveHint == nil || !*tl.Annotations.DestructiveHint) {
+			t.Fatal("clear_board must be annotated destructive")
+		}
+	}
+
+	for _, confirm := range []string{"", "work", "Personal", "yes"} {
+		if out, ok := callTool(t, cs, "clear_board", map[string]any{"board": "Work", "confirm": confirm}); ok ||
+			!strings.Contains(out["error"].(string), `"Work"`) {
+			t.Fatalf("confirm %q = %v", confirm, out)
+		}
+	}
+	if n := len(decode[[]db.Item](t, h.do("GET", "/api/lists/"+work+"/items", ""))); n != 2 {
+		t.Fatalf("refused clear still erased: %d items", n)
+	}
+
+	out, ok := callTool(t, cs, "clear_board", map[string]any{"board": "Work", "confirm": "Work"})
+	if !ok || out["items"] != float64(2) || out["briefings"] != float64(1) {
+		t.Fatalf("clear = %v", out)
+	}
+	if n := len(decode[[]db.Item](t, h.do("GET", "/api/lists/"+work+"/items", ""))); n != 0 {
+		t.Fatalf("after clear: %d items", n)
+	}
+	if n := len(decode[[]db.Item](t, h.do("GET", "/api/lists/"+h.todayID("2")+"/items", ""))); n != 1 {
+		t.Fatal("other board was cleared")
+	}
+	if rec := h.do("GET", "/api/boards/1/lists", ""); len(decode[[]db.List](t, rec)) != 1 {
+		t.Fatal("lists must survive a clear")
+	}
+
+	// REST: a Personal-only token can't clear Work, and needs the exact name.
+	tok := h.newToken("2", "personal")
+	if rec := h.bearer(tok, "POST", "/api/boards/1/clear", `{"confirm":"Work"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("token clearing other board = %d", rec.Code)
+	}
+	if rec := h.bearer(tok, "POST", "/api/boards/2/clear", `{"confirm":"personal"}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("wrong-case confirm = %d", rec.Code)
+	}
+	if rec := h.bearer(tok, "POST", "/api/boards/2/clear", `{"confirm":"Personal"}`); rec.Code != 200 {
+		t.Fatalf("REST clear = %d %s", rec.Code, rec.Body)
+	}
+}

@@ -70,8 +70,16 @@ func (s *Server) newMCPServer(p *principal) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{Name: "push_inbox", Description: "Push triage candidates (emails, Jira issues, events) to the board's inbox. Re-pushing a source_id refreshes it but keeps its status."}, t.pushInbox)
 	mcp.AddTool(srv, &mcp.Tool{Name: "set_widget", Description: "Replace a named widget's JSON payload, e.g. name \"calendar\" with today's events or \"jira\" with open issues."}, t.setWidget)
 	mcp.AddTool(srv, &mcp.Tool{Name: "propose_timeboxes", Description: "Replace the proposed timeboxes for one day on a board (24h HH:MM, board time zone). People accept them on the dashboard; nothing is written to any calendar."}, t.proposeTimeboxes)
+	mcp.AddTool(srv, &mcp.Tool{Name: "clear_board",
+		Description: "DESTRUCTIVE, no undo: erase everything posted to a board (all list items, briefings, inbox, widgets, timeboxes). " +
+			"Keeps the board, its lists and its connections. Only call this when the user explicitly asks to clear or erase that board. " +
+			"confirm must be the board's exact name.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(true), IdempotentHint: true, OpenWorldHint: ptr(false)},
+	}, t.clearBoard)
 	return srv
 }
+
+func ptr[T any](v T) *T { return &v }
 
 type mcpTools struct {
 	s *Server
@@ -402,6 +410,23 @@ func (t *mcpTools) proposeTimeboxes(ctx context.Context, _ *mcp.CallToolRequest,
 	}
 	slog.Info("timeboxes proposed", "board", b.ID, "date", in.Date, "count", len(boxes), "by", t.p.label)
 	return nil, timeboxesOut{Timeboxes: boxes}, nil
+}
+
+type clearBoardIn struct {
+	Board   string `json:"board" jsonschema:"board name or id"`
+	Confirm string `json:"confirm" jsonschema:"the board's exact name, e.g. Work; required to prove the erase is intended"`
+}
+
+func (t *mcpTools) clearBoard(ctx context.Context, _ *mcp.CallToolRequest, in clearBoardIn) (*mcp.CallToolResult, db.ClearCounts, error) {
+	b, err := t.resolveBoard(ctx, in.Board)
+	if err != nil {
+		return nil, db.ClearCounts{}, err
+	}
+	c, err := t.s.clearBoard(ctx, t.p, b, in.Confirm)
+	if err != nil {
+		return nil, db.ClearCounts{}, err
+	}
+	return nil, *c, nil
 }
 
 func optional(s string) *string {
