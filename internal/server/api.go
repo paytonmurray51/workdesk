@@ -33,6 +33,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/boards/{board}/widgets", s.authed(s.listWidgets))
 	mux.Handle("PUT /api/boards/{board}/days/{date}/timeboxes", s.authed(s.putTimeboxes))
 	mux.Handle("GET /api/boards/{board}/days/{date}/timeboxes", s.authed(s.getTimeboxes))
+	mux.Handle("PATCH /api/boards/{board}/days/{date}/timeboxes", s.authed(s.acceptTimeboxes))
 
 	mux.Handle("GET /api/boards/{board}/tokens", s.sessionOnly(s.listTokens))
 	mux.Handle("POST /api/boards/{board}/tokens", s.sessionOnly(s.createToken))
@@ -393,7 +394,12 @@ func (s *Server) putWidget(w http.ResponseWriter, r *http.Request, p *principal)
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	wd, err := s.store.SetWidget(r.Context(), b.ID, r.PathValue("name"), json.RawMessage(body))
+	payload, err := normalizeWidget(r.PathValue("name"), json.RawMessage(body), b.Timezone)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	wd, err := s.store.SetWidget(r.Context(), b.ID, r.PathValue("name"), payload)
 	if err != nil {
 		writeStoreErr(w, err)
 		return
@@ -436,7 +442,35 @@ func (s *Server) putTimeboxes(w http.ResponseWriter, r *http.Request, p *princip
 		}
 		boxes = wrapped.Boxes
 	}
+	if err := checkTimeboxes(r.PathValue("date"), boxes); err != nil {
+		writeStoreErr(w, err)
+		return
+	}
 	out, err := s.store.SetTimeboxes(r.Context(), b.ID, r.PathValue("date"), boxes)
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// acceptTimeboxes accepts (or un-accepts) a day's proposed plan: body {"accepted": true}.
+func (s *Server) acceptTimeboxes(w http.ResponseWriter, r *http.Request, p *principal) {
+	b, ok := s.pathBoard(w, r, p)
+	if !ok {
+		return
+	}
+	var in struct {
+		Accepted *bool `json:"accepted"`
+	}
+	if !decodeBody(w, r, &in) {
+		return
+	}
+	if in.Accepted == nil {
+		writeErr(w, http.StatusBadRequest, `body must be {"accepted": true|false}`)
+		return
+	}
+	out, err := s.store.AcceptTimeboxes(r.Context(), b.ID, r.PathValue("date"), *in.Accepted)
 	if err != nil {
 		writeStoreErr(w, err)
 		return

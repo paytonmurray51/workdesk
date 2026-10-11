@@ -68,8 +68,15 @@ func (s *Server) newMCPServer(p *principal) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{Name: "update_item", Description: "Check/uncheck, rename or move an item by id."}, t.updateItem)
 	mcp.AddTool(srv, &mcp.Tool{Name: "post_briefing", Description: "Post the board's briefing in Markdown (shown in the Morning brief tile). Use source_id like \"brief-2026-10-12\" so a re-run replaces it."}, t.postBriefing)
 	mcp.AddTool(srv, &mcp.Tool{Name: "push_inbox", Description: "Push triage candidates (emails, Jira issues, events) to the board's inbox. Re-pushing a source_id refreshes it but keeps its status."}, t.pushInbox)
-	mcp.AddTool(srv, &mcp.Tool{Name: "set_widget", Description: "Replace a named widget's JSON payload, e.g. name \"calendar\" with today's events or \"jira\" with open issues."}, t.setWidget)
-	mcp.AddTool(srv, &mcp.Tool{Name: "propose_timeboxes", Description: "Replace the proposed timeboxes for one day on a board (24h HH:MM, board time zone). People accept them on the dashboard; nothing is written to any calendar."}, t.proposeTimeboxes)
+	mcp.AddTool(srv, &mcp.Tool{Name: "set_widget", Description: "Replace a named widget's JSON payload. The dashboard draws two: " +
+		"name \"jira\" with " + jiraShape + "; and name \"calendar\" with " + calendarShape + ". " +
+		"Common variants (Jira's fields.summary/fields.status.name, ISO datetimes) are converted; " +
+		"anything else is rejected with an explanation."}, t.setWidget)
+	mcp.AddTool(srv, &mcp.Tool{Name: "propose_timeboxes", Description: "Replace the proposed timeboxes for one day on a board; they appear in the board's \"Your day\" tile. " +
+		"date is YYYY-MM-DD (the board's today); each box has start/end as 24h HH:MM in the board time zone, " +
+		"kind \"meeting\" (real calendar events), \"task\" (focus work; set item_ids to the to-do ids it covers) or " +
+		"\"break\" (lunch, buffers), and a title. Boxes should not overlap. " +
+		"People accept the plan on the dashboard; nothing is written to any calendar."}, t.proposeTimeboxes)
 	mcp.AddTool(srv, &mcp.Tool{Name: "clear_board",
 		Description: "DESTRUCTIVE, no undo: erase everything posted to a board (all list items, briefings, inbox, widgets, timeboxes). " +
 			"Keeps the board, its lists and its connections. Only call this when the user explicitly asks to clear or erase that board. " +
@@ -131,7 +138,10 @@ func (t *mcpTools) resolveList(ctx context.Context, listID int64, board, name st
 }
 
 func toolErr(err error) error {
+	var ie inputError
 	switch {
+	case errors.As(err, &ie):
+		return ie
 	case errors.Is(err, db.ErrInvalid):
 		return errors.New("invalid input: check required fields and limits")
 	case errors.Is(err, db.ErrNotFound):
@@ -370,6 +380,10 @@ func (t *mcpTools) setWidget(ctx context.Context, _ *mcp.CallToolRequest, in wid
 	if err != nil || in.Payload == nil {
 		return nil, widgetOut{}, errors.New("payload must be JSON")
 	}
+	payload, err = normalizeWidget(in.Name, payload, b.Timezone)
+	if err != nil {
+		return nil, widgetOut{}, toolErr(err)
+	}
 	wd, err := t.s.store.SetWidget(ctx, b.ID, in.Name, payload)
 	if err != nil {
 		return nil, widgetOut{}, toolErr(err)
@@ -403,6 +417,9 @@ func (t *mcpTools) proposeTimeboxes(ctx context.Context, _ *mcp.CallToolRequest,
 	news := make([]db.NewTimebox, len(in.Boxes))
 	for i, bx := range in.Boxes {
 		news[i] = db.NewTimebox(bx)
+	}
+	if err := checkTimeboxes(in.Date, news); err != nil {
+		return nil, timeboxesOut{}, toolErr(err)
 	}
 	boxes, err := t.s.store.SetTimeboxes(ctx, b.ID, in.Date, news)
 	if err != nil {

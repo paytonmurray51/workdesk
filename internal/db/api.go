@@ -578,3 +578,57 @@ func normalizeObject(raw json.RawMessage, max int) (string, error) {
 	}
 	return string(raw), nil
 }
+
+// AcceptTimeboxes marks every box of one day as accepted (or back to proposed).
+func (s *Store) AcceptTimeboxes(ctx context.Context, boardID int64, date string, accepted bool) ([]Timebox, error) {
+	if !ValidDate(date) {
+		return nil, ErrInvalid
+	}
+	if _, err := s.DB.ExecContext(ctx, `UPDATE timeboxes SET accepted = ? WHERE board_id = ? AND date = ?`,
+		accepted, boardID, date); err != nil {
+		return nil, err
+	}
+	return s.Timeboxes(ctx, boardID, date)
+}
+
+// RollOver runs a board's carry-over once per local day. On the first call for a new day it
+// adds one to carried_days of every open item on the board's daily lists that was created
+// before today; countDay=false (e.g. weekends on a work board) records the day without
+// counting it. It returns how many items were bumped. Calling it again the same day is a no-op.
+func (s *Store) RollOver(ctx context.Context, boardID int64, today string, startOfToday time.Time, countDay bool) (int64, error) {
+	if !ValidDate(today) {
+		return 0, ErrInvalid
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var last sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT rolled_over_on FROM boards WHERE id = ?`, boardID).Scan(&last); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	if last.Valid && last.String >= today {
+		return 0, nil
+	}
+	var n int64
+	// The first run only records the day: there is no "yesterday" to carry from yet.
+	if last.Valid && countDay {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE items SET carried_days = carried_days + 1, updated_at = ?
+			WHERE done = 0 AND created_at < ?
+			  AND list_id IN (SELECT id FROM lists WHERE board_id = ? AND kind = 'daily')`,
+			now().Format(timeFmt), startOfToday.UTC().Format(timeFmt), boardID)
+		if err != nil {
+			return 0, err
+		}
+		n, _ = res.RowsAffected()
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE boards SET rolled_over_on = ? WHERE id = ?`, today, boardID); err != nil {
+		return 0, err
+	}
+	return n, tx.Commit()
+}

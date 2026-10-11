@@ -48,9 +48,11 @@ func run() error {
 	}
 	defer store.Close()
 
+	app := server.New(cfg, store, web.Dist())
+	go app.RunJobs(ctx)
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           server.New(cfg, store, web.Dist()).Handler(),
+		Handler:           app.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,

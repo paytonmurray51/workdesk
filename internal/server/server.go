@@ -247,7 +247,10 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 }
 
 func writeStoreErr(w http.ResponseWriter, err error) {
+	var ie inputError
 	switch {
+	case errors.As(err, &ie):
+		writeErr(w, http.StatusBadRequest, ie.Error())
 	case errors.Is(err, db.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not found")
 	case errors.Is(err, db.ErrInvalid):
