@@ -144,7 +144,7 @@ resource_metadata=…` so connectors discover OAuth. Sample routine prompt:
    request) until invites land in milestone 5; admins see every board. Seeds Work
    (`has_schedule`) and Personal, each with a daily "Today" list. API so far (session cookie
    only): `GET /api/me`, `GET /api/boards`, `GET /api/boards/{board}/lists`,
-   `GET|POST /api/lists/{list}/items`, `PATCH /api/items/{id}` (done, title).
+   `GET|POST /api/lists/{list}/items`, `PATCH /api/items/{id}` (done, title), `DELETE /api/items/{id}` (added 2026-10-11 for the Home Assistant to-do sync).
 2. API + tokens + MCP server; a sample Claude routine prompt that posts a briefing.
    **Done 2026-10-10.** Also: OAuth for claude.ai connectors (see Decisions), Settings page
    (MCP URL, tokens, connected apps), and the Morning brief tile shows the latest briefing.

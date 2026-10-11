@@ -20,6 +20,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/lists/{list}/items", s.authed(s.listItems))
 	mux.Handle("POST /api/lists/{list}/items", s.authed(s.addItems))
 	mux.Handle("PATCH /api/items/{id}", s.authed(s.patchItem))
+	mux.Handle("DELETE /api/items/{id}", s.authed(s.deleteItem))
 
 	mux.Handle("POST /api/boards/{board}/briefings", s.authed(s.postBriefing))
 	mux.Handle("GET /api/boards/{board}/briefings/latest", s.authed(s.latestBriefing))
@@ -164,6 +165,25 @@ func (s *Server) patchItem(w http.ResponseWriter, r *http.Request, p *principal)
 		return
 	}
 	writeJSON(w, http.StatusOK, it)
+}
+
+func (s *Server) deleteItem(w http.ResponseWriter, r *http.Request, p *principal) {
+	id, ok := pathID(w, r, "id")
+	if !ok {
+		return
+	}
+	it, err := s.store.Item(r.Context(), id)
+	if err == nil {
+		_, _, err = s.list(r.Context(), p, it.ListID)
+	}
+	if err == nil {
+		err = s.store.DeleteItem(r.Context(), id)
+	}
+	if err != nil {
+		writeStoreErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // updateItem checks access to the item's list and, when moving, to the target list.

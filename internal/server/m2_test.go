@@ -541,3 +541,27 @@ func TestClearBoard(t *testing.T) {
 		t.Fatalf("REST clear = %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestDeleteItem(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin@example.com")
+	tok := h.newToken("2", "home assistant")
+	work, personal := h.todayID("1"), h.todayID("2")
+
+	mine := decode[[]db.Item](t, h.bearer(tok, "POST", "/api/lists/"+personal+"/items", `{"title":"Butter"}`))
+	other := decode[[]db.Item](t, h.do("POST", "/api/lists/"+work+"/items", `{"title":"Work thing"}`))
+
+	// A Personal token can't delete a Work item.
+	if rec := h.bearer(tok, "DELETE", "/api/items/"+itoa(other[0].ID), ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-board delete = %d, want 404", rec.Code)
+	}
+	if rec := h.bearer(tok, "DELETE", "/api/items/"+itoa(mine[0].ID), ""); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete = %d %s", rec.Code, rec.Body)
+	}
+	if n := len(decode[[]db.Item](t, h.bearer(tok, "GET", "/api/lists/"+personal+"/items", ""))); n != 0 {
+		t.Fatalf("items after delete = %d", n)
+	}
+	if rec := h.bearer(tok, "DELETE", "/api/items/"+itoa(mine[0].ID), ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("second delete = %d, want 404", rec.Code)
+	}
+}

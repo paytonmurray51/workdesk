@@ -292,6 +292,18 @@ func (s *Store) UpdateItem(ctx context.Context, id int64, p ItemPatch) (*Item, e
 	return &it, nil
 }
 
+// DeleteItem removes one item.
+func (s *Store) DeleteItem(ctx context.Context, id int64) error {
+	res, err := s.DB.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // StartOfDay returns local midnight of t in the named zone.
 func StartOfDay(t time.Time, tz string) time.Time {
 	loc, err := time.LoadLocation(tz)
