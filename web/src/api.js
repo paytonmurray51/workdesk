@@ -26,6 +26,9 @@ export const api = {
   items: (listId) => request('GET', `/api/lists/${listId}/items`),
   addItem: (listId, title) => request('POST', `/api/lists/${listId}/items`, { title }),
   setDone: (id, done) => request('PATCH', `/api/items/${id}`, { done }),
+  timeboxes: (boardId, date) => request('GET', `/api/boards/${boardId}/days/${date}/timeboxes`),
+  acceptTimeboxes: (boardId, date, accepted) =>
+    request('PATCH', `/api/boards/${boardId}/days/${date}/timeboxes`, { accepted }),
   widgets: (boardId) => request('GET', `/api/boards/${boardId}/widgets`),
   inbox: (boardId) => request('GET', `/api/boards/${boardId}/inbox?status=new`),
   inboxStatus: (id, status) => request('PATCH', `/api/inbox/${id}`, { status }),

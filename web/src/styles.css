@@ -735,3 +735,59 @@ a.event-title:hover {
   padding: 0 12px;
   font-size: 15px;
 }
+
+/* Your day (timeboxes) */
+.day-boxes .event.box-meeting .event-time {
+  color: var(--sun);
+}
+.day-boxes .event.box-break {
+  opacity: 0.75;
+}
+.day-boxes .event.box-break .event-title {
+  font-weight: 400;
+  font-style: italic;
+}
+.day-boxes .event.box-task {
+  box-shadow: inset 3px 0 0 var(--line);
+  padding-left: 10px;
+}
+.day-boxes .event.box-task.now {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.kind-chip {
+  opacity: 0.8;
+}
+.ok-chip {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.box-items {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+.box-items label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.box-items label.done span {
+  text-decoration: line-through;
+}
+.box-items input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.day-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}

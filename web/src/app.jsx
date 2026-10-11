@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'preact/hooks';
 import { api, ApiError } from './api.js';
 import { loadThemePref, saveThemePref, resolveTheme, applyTheme, nextPref } from './theme.js';
-import { BriefTile, ProgressTile, ListTile, CalendarTile, JiraTile, InboxTile } from './tiles.jsx';
+import { BriefTile, ProgressTile, ListTile, CalendarTile, JiraTile, InboxTile, DayTile, boardNow } from './tiles.jsx';
 import { Settings } from './settings.jsx';
 
 const BOARD_KEY = 'workdesk.board';
@@ -174,6 +174,7 @@ function Board({ board, me }) {
   const [brief, setBrief] = useState(undefined);
   const [widgets, setWidgets] = useState([]);
   const [inbox, setInbox] = useState(null);
+  const [boxes, setBoxes] = useState(undefined);
   const [error, setError] = useState('');
 
   // Loads everything for the board. Claude posts in the background, so this runs on a
@@ -187,6 +188,7 @@ function Board({ board, me }) {
         api.inbox(board.id),
       ]);
       const its = await Promise.all(ls.map((l) => api.items(l.id)));
+      if (board.has_schedule) setBoxes(await api.timeboxes(board.id, boardNow(board.timezone || undefined).date));
       setLists(ls);
       setItems(Object.fromEntries(ls.map((l, i) => [l.id, its[i]])));
       setBrief(br);
@@ -195,7 +197,7 @@ function Board({ board, me }) {
     } catch (e) {
       setError(e.message);
     }
-  }, [board.id]);
+  }, [board.id, board.has_schedule, board.timezone]);
 
   useEffect(() => {
     load();
@@ -245,6 +247,14 @@ function Board({ board, me }) {
   const done = todayItems ? todayItems.filter((i) => i.done).length : 0;
   const total = todayItems ? todayItems.length : 0;
   const carried = todayItems ? todayItems.filter((i) => !i.done && i.carried_days > 0).length : 0;
+  const itemsById = Object.fromEntries(Object.values(items).flat().map((i) => [i.id, i]));
+  const acceptPlan = async (accepted) => {
+    try {
+      setBoxes(await api.acceptTimeboxes(board.id, boardNow(board.timezone || undefined).date, accepted));
+    } catch (e) {
+      setError(e.message);
+    }
+  };
   const calendar = widgets.find((w) => w.name === 'calendar');
   const jira = widgets.find((w) => w.name === 'jira');
 
@@ -262,6 +272,9 @@ function Board({ board, me }) {
         <ProgressTile done={done} total={total} loading={lists === null} inboxCount={inbox?.length || 0} carried={carried} />
         {today && <ListTile list={today} items={todayItems} onAdd={add} onToggle={toggle} wide />}
         {calendar && <CalendarTile widget={calendar} board={board} />}
+        {board.has_schedule && (
+          <DayTile board={board} boxes={boxes} itemsById={itemsById} onAccept={acceptPlan} onToggle={toggle} />
+        )}
         {(inbox === null || inbox.length > 0 || brief) && (
           <InboxTile
             items={inbox}

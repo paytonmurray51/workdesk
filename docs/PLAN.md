@@ -79,6 +79,7 @@ PUT    /api/boards/{board}/widgets/{name}        body = JSON payload
 GET    /api/boards/{board}/widgets
 PUT    /api/boards/{board}/days/{date}/timeboxes array or {boxes: [...]}, replaces the day
 GET    /api/boards/{board}/days/{date}/timeboxes
+PATCH  /api/boards/{board}/days/{date}/timeboxes {accepted}; accept or un-accept the day's plan
 # session only (Settings UI)
 GET|POST /api/boards/{board}/tokens   DELETE /api/tokens/{id}
 GET      /api/connections             DELETE /api/connections/{id}
@@ -157,5 +158,13 @@ resource_metadata=…` so connectors discover OAuth. Sample routine prompt:
    - `jira`: `{issues: [{key, summary, status, priority, due "YYYY-MM-DD", url}]}`
    Calendar/Jira tiles appear once a routine has posted them.
 4. Timeboxes ("Your day"), carry-over job, carry-over review.
+   **Done 2026-10-11.** "Your day" tile on `has_schedule` boards: Claude's proposed blocks
+   with the linked to-dos as checkboxes, "now" marker, Accept plan / Back to proposed
+   (`PATCH .../timeboxes {accepted}`). Carry-over job runs every minute in the server and,
+   once per board-local day, bumps `carried_days` on open items in daily lists created before
+   today (`boards.rolled_over_on`; weekends don't count on work boards). `set_widget`
+   validates `jira`/`calendar` payloads, accepts common variants (Jira's `fields.*`,
+   `items`/`tickets`, ISO datetimes) and rewrites them to the tile shape; bad payloads and
+   timeboxes get a 400 / tool error that says exactly what to fix.
 5. Sharing and roles, drag-and-drop layouts, phone layout.
 6. Proxmox install script, systemd unit, release workflow, backups.

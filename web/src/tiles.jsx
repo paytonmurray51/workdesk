@@ -278,6 +278,82 @@ export function JiraTile({ widget, board }) {
   );
 }
 
+// Your day: the timeboxes Claude proposed for today (boards with a work schedule).
+
+const KIND_LABEL = { meeting: 'Meeting', task: 'Focus', break: 'Break' };
+
+export function DayTile({ board, boxes, itemsById, onAccept, onToggle }) {
+  const [busy, setBusy] = useState(false);
+  const now = boardNow(board.timezone || undefined);
+  const weekend = [0, 6].includes(new Date(`${now.date}T12:00:00`).getDay());
+  const list = boxes || [];
+  const accepted = list.length > 0 && list.every((b) => b.accepted);
+
+  const accept = async (value) => {
+    setBusy(true);
+    try {
+      await onAccept(value);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section class="tile day span-6" aria-labelledby="day-h">
+      <TileHead id="day-h" title="Your day">
+        {list.length > 0 && (
+          <span class={'chip' + (accepted ? ' ok-chip' : '')}>{accepted ? 'accepted' : 'proposed by Claude'}</span>
+        )}
+      </TileHead>
+      {boxes === undefined ? (
+        <p class="muted">Loading…</p>
+      ) : list.length === 0 ? (
+        <p class="muted">
+          {weekend ? 'No plan on weekends. Enjoy the trail.' : 'No plan yet. Your morning routine proposes one on workdays.'}
+        </p>
+      ) : (
+        <>
+          <ol class="events day-boxes">
+            {list.map((b) => {
+              const past = b.end <= now.time;
+              const nowOn = b.start <= now.time && now.time < b.end;
+              const linked = (b.item_ids || []).map((id) => itemsById[id]).filter(Boolean);
+              return (
+                <li class={`event box-${b.kind}` + (past ? ' past' : '') + (nowOn ? ' now' : '')}>
+                  <span class="event-time">{fmtTime(b.start)}–{fmtTime(b.end)}</span>
+                  <span class="event-body">
+                    <span class="event-title">{b.title}</span>
+                    {linked.length > 0 && (
+                      <ul class="box-items">
+                        {linked.map((it) => (
+                          <li>
+                            <label class={it.done ? 'done' : ''}>
+                              <input type="checkbox" checked={it.done} onChange={() => onToggle(it)} />
+                              <span>{it.title}</span>
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </span>
+                  {nowOn ? <span class="chip now-chip">now</span> : <span class="chip kind-chip">{KIND_LABEL[b.kind] || b.kind}</span>}
+                </li>
+              );
+            })}
+          </ol>
+          <div class="day-actions">
+            {accepted ? (
+              <button type="button" class="btn ghost" disabled={busy} onClick={() => accept(false)}>Back to proposed</button>
+            ) : (
+              <button type="button" class="btn primary" disabled={busy} onClick={() => accept(true)}>Accept plan</button>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 // Inbox triage
 
 export function InboxTile({ items, onAdd, onSnooze, onDismiss }) {
