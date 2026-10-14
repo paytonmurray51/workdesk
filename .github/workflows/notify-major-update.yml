@@ -1,0 +1,37 @@
+name: Notify Major Version Update
+
+on:
+  pull_request:
+    types: [opened, labeled]
+
+jobs:
+  notify:
+    name: Email major version PR notification
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'major-version')
+
+    steps:
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v22
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: paytonmurray51@gmail.com
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "[Workdesk] Major update needs review: ${{ github.event.pull_request.title }}"
+          to: paytonmurray51@gmail.com
+          from: Workdesk CI <paytonmurray51@gmail.com>
+          body: |
+            A major version dependency update is ready for your review.
+            This update will NOT be auto-merged — you must review and merge it manually.
+
+            PR:    ${{ github.event.pull_request.html_url }}
+            Title: ${{ github.event.pull_request.title }}
+
+            Review this update carefully before merging — major versions may include breaking changes.
+
+            ─────────────────────────────────────────
+            Release Notes & Details
+            ─────────────────────────────────────────
+            ${{ github.event.pull_request.body }}

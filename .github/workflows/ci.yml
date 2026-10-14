@@ -1,0 +1,20 @@
+name: CI
+
+# Builds the Docker image, which runs `npm ci`, the Vite build and `go test ./...`.
+# Renovate only automerges a PR once this check passes.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image (frontend build + Go tests)
+        run: docker build --pull -t workdesk:ci .

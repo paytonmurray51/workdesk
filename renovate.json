@@ -1,0 +1,54 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "America/Chicago",
+  "schedule": ["before 9am on Monday"],
+  "labels": ["dependencies"],
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-version"]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "addLabels": ["github-actions"]
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "Go modules",
+      "addLabels": ["go"]
+    },
+    {
+      "matchDatasources": ["golang-version"],
+      "groupName": "Go toolchain",
+      "addLabels": ["go"]
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["golang"],
+      "groupName": "Go toolchain",
+      "addLabels": ["go"]
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Frontend (npm)",
+      "addLabels": ["frontend"]
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["node", "gcr.io/distroless/static-debian12"],
+      "groupName": "Docker base images",
+      "addLabels": ["docker"]
+    }
+  ]
+}
