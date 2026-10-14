@@ -104,7 +104,7 @@ export function ProgressTile({ done, total, loading, inboxCount, carried }) {
 
 // Lists
 
-export function ListTile({ list, items, onAdd, onToggle, wide }) {
+export function ListTile({ list, items, onAdd, onToggle, onRemove, wide }) {
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -159,13 +159,13 @@ export function ListTile({ list, items, onAdd, onToggle, wide }) {
             <div class="group">
               {g.key && <h3 class="section">{g.key}</h3>}
               <ul class="items">
-                {g.items.map((it) => <Item key={it.id} item={it} onToggle={onToggle} />)}
+                {g.items.map((it) => <Item key={it.id} item={it} onToggle={onToggle} onRemove={onRemove} />)}
               </ul>
             </div>
           ))}
           {done.length > 0 && (
             <ul class="items done-list" aria-label="Done today">
-              {done.map((it) => <Item key={it.id} item={it} onToggle={onToggle} />)}
+              {done.map((it) => <Item key={it.id} item={it} onToggle={onToggle} onRemove={onRemove} />)}
             </ul>
           )}
         </>
@@ -174,7 +174,7 @@ export function ListTile({ list, items, onAdd, onToggle, wide }) {
   );
 }
 
-function Item({ item, onToggle }) {
+function Item({ item, onToggle, onRemove }) {
   const id = `item-${item.id}`;
   const url = safeURL(item.source_url);
   return (
@@ -187,6 +187,12 @@ function Item({ item, onToggle }) {
       </label>
       {url && (
         <a class="btn ghost source" href={url} target="_blank" rel="noopener noreferrer" aria-label={`Open source for ${item.title}`}>↗</a>
+      )}
+      {onRemove && (
+        <button type="button" class="btn ghost remove" onClick={() => onRemove(item)}
+          aria-label={`Remove ${item.title}`} title="Remove (doesn't count as done)">
+          <span aria-hidden="true">×</span>
+        </button>
       )}
     </li>
   );

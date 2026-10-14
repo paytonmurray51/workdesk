@@ -26,6 +26,7 @@ export const api = {
   items: (listId) => request('GET', `/api/lists/${listId}/items`),
   addItem: (listId, title) => request('POST', `/api/lists/${listId}/items`, { title }),
   setDone: (id, done) => request('PATCH', `/api/items/${id}`, { done }),
+  deleteItem: (id) => request('DELETE', `/api/items/${id}`),
   timeboxes: (boardId, date) => request('GET', `/api/boards/${boardId}/days/${date}/timeboxes`),
   acceptTimeboxes: (boardId, date, accepted) =>
     request('PATCH', `/api/boards/${boardId}/days/${date}/timeboxes`, { accepted }),

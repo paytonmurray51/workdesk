@@ -64,7 +64,7 @@ func (s *Server) newMCPServer(p *principal) *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_lists", Description: "List a board's lists (id, name, kind daily|standing)."}, t.listLists)
 	mcp.AddTool(srv, &mcp.Tool{Name: "create_list", Description: "Create a list on a board. If a list with that name exists it is returned unchanged."}, t.createList)
 	mcp.AddTool(srv, &mcp.Tool{Name: "list_open_items", Description: "List unchecked items on a list. Name the list by list_id, or by board + list name (default \"Today\")."}, t.listOpenItems)
-	mcp.AddTool(srv, &mcp.Tool{Name: "add_items", Description: "Add to-do items to a list (default the board's \"Today\" list). Items with a source_id are upserted: re-posting updates title/link but keeps checked state."}, t.addItems)
+	mcp.AddTool(srv, &mcp.Tool{Name: "add_items", Description: "Add to-do items to a list (default the board's \"Today\" list). Items with a source_id are upserted: re-posting updates title/link but keeps checked state. Items the user removed from the list are skipped and returned in \"skipped\"; don't re-add them under another source_id."}, t.addItems)
 	mcp.AddTool(srv, &mcp.Tool{Name: "update_item", Description: "Check/uncheck, rename or move an item by id."}, t.updateItem)
 	mcp.AddTool(srv, &mcp.Tool{Name: "post_briefing", Description: "Post the board's briefing in Markdown (shown in the Morning brief tile). Use source_id like \"brief-2026-10-12\" so a re-run replaces it."}, t.postBriefing)
 	mcp.AddTool(srv, &mcp.Tool{Name: "push_inbox", Description: "Push triage candidates (emails, Jira issues, events) to the board's inbox. Re-pushing a source_id refreshes it but keeps its status."}, t.pushInbox)
@@ -226,7 +226,8 @@ type listRef struct {
 }
 
 type itemsOut struct {
-	Items []db.Item `json:"items"`
+	Items   []db.Item `json:"items"`
+	Skipped []string  `json:"skipped,omitempty" jsonschema:"source_ids the user removed from this list; not re-added"`
 }
 
 func (t *mcpTools) listOpenItems(ctx context.Context, _ *mcp.CallToolRequest, in listRef) (*mcp.CallToolResult, itemsOut, error) {
@@ -269,7 +270,22 @@ func (t *mcpTools) addItems(ctx context.Context, _ *mcp.CallToolRequest, in addI
 			SourceType: it.SourceType, SourceID: it.SourceID, SourceURL: it.SourceURL}
 	}
 	items, err := t.s.store.AddItems(ctx, l.ID, news)
-	return nil, itemsOut{Items: items}, toolErr(err)
+	if err != nil {
+		return nil, itemsOut{}, toolErr(err)
+	}
+	added := map[string]bool{}
+	for _, it := range items {
+		if it.SourceID != nil {
+			added[*it.SourceID] = true
+		}
+	}
+	out := itemsOut{Items: items}
+	for _, n := range news {
+		if n.SourceID != "" && !added[n.SourceID] {
+			out.Skipped = append(out.Skipped, n.SourceID)
+		}
+	}
+	return nil, out, nil
 }
 
 type updateItemIn struct {

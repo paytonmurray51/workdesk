@@ -370,6 +370,11 @@ func (s *Store) InboxToList(ctx context.Context, inboxID, listID int64) (*Item, 
 	n := NewItem{Title: in.Title, SourceType: in.Type, SourceURL: in.URL}
 	if in.SourceID != nil {
 		n.SourceID = *in.SourceID
+		// Adding from the inbox is a deliberate choice, so it overrides an earlier removal.
+		if _, err := s.DB.ExecContext(ctx, `DELETE FROM removed_items WHERE list_id = ? AND source_id = ?`,
+			listID, n.SourceID); err != nil {
+			return nil, err
+		}
 	}
 	items, err := s.AddItems(ctx, listID, []NewItem{n})
 	if err != nil {
@@ -404,6 +409,7 @@ func (s *Store) ClearBoard(ctx context.Context, boardID int64) (*ClearCounts, er
 		n   *int64
 	}{
 		{`DELETE FROM items WHERE list_id IN (SELECT id FROM lists WHERE board_id = ?)`, &c.Items},
+		{`DELETE FROM removed_items WHERE list_id IN (SELECT id FROM lists WHERE board_id = ?)`, new(int64)},
 		{`DELETE FROM briefings WHERE board_id = ?`, &c.Briefings},
 		{`DELETE FROM inbox_items WHERE board_id = ?`, &c.Inbox},
 		{`DELETE FROM widgets WHERE board_id = ?`, &c.Widgets},

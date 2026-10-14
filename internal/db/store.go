@@ -198,6 +198,7 @@ func (s *Store) Item(ctx context.Context, id int64) (*Item, error) {
 
 // AddItems inserts items at the end of the list in one transaction. Items with a source_id
 // are upserted: a repeat post updates title/section/due/link but keeps done state and position.
+// A source_id someone removed from the list (DeleteItem) is skipped and not returned.
 func (s *Store) AddItems(ctx context.Context, listID int64, in []NewItem) ([]Item, error) {
 	for i := range in {
 		in[i].Title = strings.TrimSpace(in[i].Title)
@@ -223,6 +224,14 @@ func (s *Store) AddItems(ctx context.Context, listID int64, in []NewItem) ([]Ite
 		var sourceID *string
 		if n.SourceID != "" {
 			sourceID = &n.SourceID
+			var removed int
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM removed_items WHERE list_id = ? AND source_id = ?`,
+				listID, n.SourceID).Scan(&removed); err != nil {
+				return nil, err
+			}
+			if removed > 0 {
+				continue
+			}
 		}
 		row := tx.QueryRowContext(ctx, `
 			INSERT INTO items (list_id, title, section, due, source_type, source_id, source_url, position, updated_at)
@@ -293,15 +302,30 @@ func (s *Store) UpdateItem(ctx context.Context, id int64, p ItemPatch) (*Item, e
 }
 
 // DeleteItem removes one item.
+// DeleteItem removes an item. If it came from a routine (source_id), that source_id is
+// remembered for the list so a re-run doesn't add it back.
 func (s *Store) DeleteItem(ctx context.Context, id int64) error {
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM items WHERE id = ?`, id)
+	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	defer tx.Rollback()
+	var listID int64
+	var sourceID *string
+	err = tx.QueryRowContext(ctx, `DELETE FROM items WHERE id = ? RETURNING list_id, source_id`, id).Scan(&listID, &sourceID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if sourceID != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO removed_items (list_id, source_id, removed_at) VALUES (?, ?, ?)`,
+			listID, *sourceID, now().Format(timeFmt)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // StartOfDay returns local midnight of t in the named zone.

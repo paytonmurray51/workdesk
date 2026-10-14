@@ -229,6 +229,19 @@ function Board({ board, me }) {
     }
   };
 
+  // Removing (×) drops the item without counting it as done; a routine won't add it back.
+  const remove = async (item) => {
+    setListItems(item.list_id, (xs) => xs.filter((x) => x.id !== item.id));
+    try {
+      await api.deleteItem(item.id);
+    } catch (e) {
+      if (e.status !== 404) {
+        setListItems(item.list_id, (xs) => [...xs, item].sort((a, b) => a.position - b.position));
+        setError(e.message);
+      }
+    }
+  };
+
   // Triage removes the entry right away and restores it if the server says no.
   const triage = (fn) => async (entry) => {
     setInbox((xs) => xs.filter((x) => x.id !== entry.id));
@@ -270,7 +283,7 @@ function Board({ board, me }) {
       <div class="tiles grid">
         <BriefTile board={board} brief={brief} />
         <ProgressTile done={done} total={total} loading={lists === null} inboxCount={inbox?.length || 0} carried={carried} />
-        {today && <ListTile list={today} items={todayItems} onAdd={add} onToggle={toggle} wide />}
+        {today && <ListTile list={today} items={todayItems} onAdd={add} onToggle={toggle} onRemove={remove} wide />}
         {calendar && <CalendarTile widget={calendar} board={board} />}
         {board.has_schedule && (
           <DayTile board={board} boxes={boxes} itemsById={itemsById} onAccept={acceptPlan} onToggle={toggle} />
@@ -285,7 +298,7 @@ function Board({ board, me }) {
         )}
         {jira && <JiraTile widget={jira} board={board} />}
         {others.map((l) => (
-          <ListTile key={l.id} list={l} items={items[l.id]} onAdd={add} onToggle={toggle} />
+          <ListTile key={l.id} list={l} items={items[l.id]} onAdd={add} onToggle={toggle} onRemove={remove} />
         ))}
       </div>
     </div>
