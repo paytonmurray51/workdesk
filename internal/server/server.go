@@ -30,6 +30,7 @@ type Server struct {
 	google   *auth.Google
 	ui       fs.FS
 	schemas  *mcp.SchemaCache
+	feedback feedbackLimiter
 }
 
 func New(cfg *config.Config, store *db.Store, ui fs.FS) *Server {

@@ -809,3 +809,101 @@ a.event-title:hover {
   justify-content: flex-end;
   margin-top: 12px;
 }
+
+/* Feedback: small button at the top-right, dialog with type + message */
+.feedback-btn {
+  padding: 0 10px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.feedback-btn:hover {
+  color: var(--text);
+}
+.feedback-label {
+  display: none;
+}
+@media (min-width: 640px) {
+  .feedback-label {
+    display: inline;
+  }
+}
+.feedback-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 20px;
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.feedback-dialog::backdrop {
+  background: color-mix(in srgb, #000 45%, transparent);
+}
+.feedback-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+.feedback-dialog form,
+.feedback-done {
+  display: grid;
+  gap: 12px;
+}
+.feedback-dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 140px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.feedback-dialog textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+.feedback-dialog p {
+  margin: 0;
+}
+.seg {
+  display: flex;
+  gap: 4px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.seg-opt {
+  flex: 1;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.seg-opt.on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 15%, transparent);
+}
+.seg-opt input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.seg-opt:has(input:focus-visible) {
+  outline: 3px solid color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.feedback-done a {
+  color: var(--accent);
+  font-weight: 600;
+}

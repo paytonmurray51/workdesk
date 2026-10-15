@@ -3,6 +3,7 @@ import { api, ApiError } from './api.js';
 import { loadThemePref, saveThemePref, resolveTheme, applyTheme, nextPref } from './theme.js';
 import { BriefTile, ProgressTile, ListTile, CalendarTile, JiraTile, InboxTile, DayTile, boardNow } from './tiles.jsx';
 import { Settings } from './settings.jsx';
+import { FeedbackButton } from './feedback.jsx';
 
 const BOARD_KEY = 'workdesk.board';
 
@@ -150,6 +151,7 @@ function Desk({ me, boards, themeButton }) {
       <button type="button" class="btn ghost" onClick={signOut} title={me.email}>
         Sign out
       </button>
+      {me.feedback && <FeedbackButton me={me} board={board} view={view} />}
     </>
   );
 

@@ -17,6 +17,11 @@ type Config struct {
 	GoogleClientSecret string
 	SessionSecret      []byte
 	AdminEmails        map[string]bool
+	// Feedback button: issues are filed in FeedbackRepo ("owner/repo") with FeedbackToken, a
+	// fine-grained GitHub token limited to Issues: read and write on that repo. Optional.
+	FeedbackRepo  string
+	FeedbackToken string
+	GitHubAPI     string
 }
 
 func FromEnv() (*Config, error) {
@@ -28,6 +33,9 @@ func FromEnv() (*Config, error) {
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 		SessionSecret:      []byte(os.Getenv("WORKDESK_SESSION_SECRET")),
 		AdminEmails:        ParseEmails(os.Getenv("WORKDESK_ADMIN_EMAILS")),
+		FeedbackRepo:       getenv("WORKDESK_FEEDBACK_REPO", "paytonmurray51/workdesk"),
+		FeedbackToken:      os.Getenv("WORKDESK_FEEDBACK_GITHUB_TOKEN"),
+		GitHubAPI:          "https://api.github.com",
 	}
 	var errs []error
 	if _, err := url.ParseRequestURI(c.BaseURL); err != nil {

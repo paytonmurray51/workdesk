@@ -14,6 +14,7 @@ import (
 
 func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/me", s.authed(s.me))
+	mux.Handle("POST /api/feedback", s.authed(s.postFeedback))
 	mux.Handle("GET /api/boards", s.authed(s.listBoards))
 	mux.Handle("GET /api/boards/{board}/lists", s.authed(s.listLists))
 	mux.Handle("POST /api/boards/{board}/lists", s.authed(s.createList))
@@ -45,7 +46,8 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 func (s *Server) me(w http.ResponseWriter, r *http.Request, p *principal) {
 	out := map[string]any{"kind": p.kind, "name": p.label}
 	if p.user != nil {
-		out = map[string]any{"kind": p.kind, "id": p.user.ID, "email": p.user.Email, "name": p.user.Name, "admin": p.admin}
+		out = map[string]any{"kind": p.kind, "id": p.user.ID, "email": p.user.Email, "name": p.user.Name, "admin": p.admin,
+			"feedback": s.cfg.FeedbackToken != "", "version": Version}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

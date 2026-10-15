@@ -6,7 +6,11 @@
 # docker0 and loopback, so it is not exposed on the LAN.
 services:
   workdesk:
-    build: .
+    build:
+      context: .
+      args:
+        # Deploy with: WORKDESK_VERSION=$(git rev-parse --short HEAD) docker compose up -d --build
+        VERSION: ${WORKDESK_VERSION:-dev}
     image: workdesk:local
     container_name: workdesk
     restart: unless-stopped

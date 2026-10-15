@@ -21,6 +21,7 @@ async function request(method, url, body) {
 
 export const api = {
   me: () => request('GET', '/api/me'),
+  feedback: (body) => request('POST', '/api/feedback', body),
   boards: () => request('GET', '/api/boards'),
   lists: (boardId) => request('GET', `/api/boards/${boardId}/lists`),
   items: (listId) => request('GET', `/api/lists/${listId}/items`),

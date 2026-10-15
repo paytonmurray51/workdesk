@@ -80,6 +80,7 @@ GET    /api/boards/{board}/widgets
 PUT    /api/boards/{board}/days/{date}/timeboxes array or {boxes: [...]}, replaces the day
 GET    /api/boards/{board}/days/{date}/timeboxes
 PATCH  /api/boards/{board}/days/{date}/timeboxes {accepted}; accept or un-accept the day's plan
+POST   /api/feedback                            {kind bug|idea|other, message, board, view, page}; files a GitHub issue (session only)
 # session only (Settings UI)
 GET|POST /api/boards/{board}/tokens   DELETE /api/tokens/{id}
 GET      /api/connections             DELETE /api/connections/{id}
@@ -137,6 +138,14 @@ resource_metadata=…` so connectors discover OAuth. Sample routine prompt:
 
 - Time zone America/Chicago. Workday 7:00 – 3:30 (some days to 4:00), lunch hour, 15 min buffer after meetings,
   last 15 min = wrap-up and carry-over. Editable per board.
+
+## Feedback
+
+A small Feedback button (top right, signed-in people only) files a GitHub issue in
+`WORKDESK_FEEDBACK_REPO` with a fine-grained token (`WORKDESK_FEEDBACK_GITHUB_TOKEN`, Issues
+read/write on that one repo, kept in `.env`). The issue adds who sent it, the board/page and
+the running version (`VERSION` build arg, the git commit). 10 per person per hour. With no token
+the button is hidden.
 
 ## Milestones
 

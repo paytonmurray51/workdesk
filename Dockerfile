@@ -15,9 +15,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /web/dist ./web/dist
+# The git commit being built, shown in Settings and on feedback issues.
+ARG VERSION=dev
 RUN go test ./... \
  && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags="-s -w" -o /out/workdesk ./cmd/workdesk \
+    go build -trimpath -ldflags="-s -w -X github.com/paytonmurray51/workdesk/internal/server.Version=${VERSION}" \
+       -o /out/workdesk ./cmd/workdesk \
  && mkdir -p /out/data
 
 # 3. Runtime: distroless static, non-root (uid 65532)
