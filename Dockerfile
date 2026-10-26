@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npm run build
 
 # 2. Server: static Go binary with the frontend embedded
-FROM golang:1.27.2-alpine AS server
+FROM golang:1.27.3-alpine AS server
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
