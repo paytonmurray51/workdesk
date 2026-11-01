@@ -50,10 +50,10 @@ func TestOpenUsesWALAndSeeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(boards) != 2 || boards[0].Name != "Work" || boards[1].Name != "Personal" {
+	if len(boards) != 3 || boards[0].Name != "Work" || boards[1].Name != "Personal" || boards[2].Name != "Homelab" {
 		t.Fatalf("boards = %+v", boards)
 	}
-	if !boards[0].HasSchedule || boards[1].HasSchedule {
+	if !boards[0].HasSchedule || boards[1].HasSchedule || boards[2].HasSchedule {
 		t.Fatalf("has_schedule: Work=%v Personal=%v", boards[0].HasSchedule, boards[1].HasSchedule)
 	}
 	for _, b := range boards {
@@ -77,8 +77,8 @@ func TestMigrationsRunOnce(t *testing.T) {
 		var n int
 		s.DB.QueryRow(`SELECT count(*) FROM boards`).Scan(&n)
 		s.Close()
-		if n != 2 {
-			t.Fatalf("open %d: %d boards, want 2 (seed ran twice?)", i, n)
+		if n != 3 {
+			t.Fatalf("open %d: %d boards, want 3 (seed ran twice?)", i, n)
 		}
 	}
 }

@@ -134,7 +134,7 @@ func TestTodayFlow(t *testing.T) {
 	h.login("admin@example.com")
 
 	boards := decode[[]db.Board](t, h.do("GET", "/api/boards", ""))
-	if len(boards) != 2 || boards[0].Name != "Work" {
+	if len(boards) != 3 || boards[0].Name != "Work" || boards[2].Name != "Homelab" {
 		t.Fatalf("boards = %+v", boards)
 	}
 	lists := decode[[]db.List](t, h.do("GET", "/api/boards/1/lists", ""))

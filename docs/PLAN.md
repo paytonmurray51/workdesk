@@ -26,6 +26,9 @@ the "Chosen direction · Option C, outdoors" artboards in the Workdesk design ca
 - Light ("trail day") and dark ("forest night") themes.
 - Drag-and-drop layout per user.
 - Hosted on Proxmox, as light as possible.
+- A third seeded board, **Homelab** (2026-11-01, migration 006), for the homelab fleet's
+  briefings and incidents (repo `paytonmurray51/homelab-fleet`). There is no "new board" UI;
+  boards are added by migration.
 
 ## Stack (lightweight)
 
