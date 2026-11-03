@@ -7,7 +7,7 @@
     "build": "vite build"
   },
   "dependencies": {
-    "preact": "11.0.2"
+    "preact": "11.1.1"
   },
   "devDependencies": {
     "@preact/preset-vite": "2.10.6",
