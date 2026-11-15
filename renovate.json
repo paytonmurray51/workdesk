@@ -1,54 +1,106 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended"
+  ],
   "timezone": "America/Chicago",
-  "schedule": ["before 9am on Monday"],
-  "labels": ["dependencies"],
-  "postUpdateOptions": ["gomodTidy"],
+  "schedule": [
+    "before 9am on Monday"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
   "packageRules": [
     {
-      "matchUpdateTypes": ["minor", "patch"],
-      "automerge": true,
-      "automergeType": "pr"
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "automerge": false
     },
     {
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "automerge": false,
-      "labels": ["dependencies", "major-version"]
+      "labels": [
+        "dependencies",
+        "major-version"
+      ]
     },
     {
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "GitHub Actions",
-      "addLabels": ["github-actions"]
+      "addLabels": [
+        "github-actions"
+      ]
     },
     {
-      "matchManagers": ["gomod"],
-      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
       "groupName": "Go modules",
-      "addLabels": ["go"]
+      "addLabels": [
+        "go"
+      ]
     },
     {
-      "matchDatasources": ["golang-version"],
+      "matchDatasources": [
+        "golang-version"
+      ],
       "groupName": "Go toolchain",
-      "addLabels": ["go"]
+      "addLabels": [
+        "go"
+      ]
     },
     {
-      "matchManagers": ["dockerfile"],
-      "matchPackageNames": ["golang"],
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchPackageNames": [
+        "golang"
+      ],
       "groupName": "Go toolchain",
-      "addLabels": ["go"]
+      "addLabels": [
+        "go"
+      ]
     },
     {
-      "matchManagers": ["npm"],
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "Frontend (npm)",
-      "addLabels": ["frontend"]
+      "addLabels": [
+        "frontend"
+      ]
     },
     {
-      "matchManagers": ["dockerfile"],
-      "matchPackageNames": ["node", "gcr.io/distroless/static-debian12"],
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "matchPackageNames": [
+        "node",
+        "gcr.io/distroless/static-debian12"
+      ],
       "groupName": "Docker base images",
-      "addLabels": ["docker"]
+      "addLabels": [
+        "docker"
+      ]
     }
-  ]
+  ],
+  "description": "The homelab fleet reviews these PRs once CI passes: it merges and deploys routine minor/patch updates and asks Payton on Telegram about the rest, so Renovate doesn't automerge."
 }
