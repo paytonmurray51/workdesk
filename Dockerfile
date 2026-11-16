@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # 1. Frontend: Preact + Vite -> web/dist
-FROM node:24.22.3-alpine AS web
+FROM node:26.13.1-alpine AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
